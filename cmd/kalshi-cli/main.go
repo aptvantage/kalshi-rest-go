@@ -39,6 +39,7 @@ func main() {
 	}
 
 	root.PersistentFlags().StringVar(&flagEnv, "env", "prod", "API environment: prod or demo")
+	root.PersistentFlags().StringVarP(&flagOutput, "output", "o", "table", "Output format: table, wide, json, yaml")
 
 	root.AddCommand(
 		newExchangeCmd(),

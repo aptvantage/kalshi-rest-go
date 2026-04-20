@@ -32,7 +32,11 @@ func newPortfolioCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 					os.Exit(1)
 				}
-				return prettyPrint(resp.JSON200)
+				b := resp.JSON200
+				return render(b, func(wide bool) ([]string, [][]string) {
+					return []string{"BALANCE", "PORTFOLIO_VALUE"},
+						[][]string{{fmtDollars(b.Balance), fmtDollars(b.PortfolioValue)}}
+				})
 			},
 		},
 		&cobra.Command{
@@ -51,7 +55,9 @@ func newPortfolioCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 					os.Exit(1)
 				}
-				return prettyPrint(resp.JSON200)
+				return render(resp.JSON200, func(wide bool) ([]string, [][]string) {
+					return positionsTable(resp.JSON200.MarketPositions, wide)
+				})
 			},
 		},
 		newFillsCmd(),
@@ -78,9 +84,68 @@ func newFillsCmd() *cobra.Command {
 				os.Exit(1)
 			}
 			_ = limit
-			return prettyPrint(resp.JSON200)
+			return render(resp.JSON200, func(wide bool) ([]string, [][]string) {
+				return fillsTable(resp.JSON200.Fills, wide)
+			})
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 50, "Max fills to return")
 	return cmd
+}
+
+func positionsTable(positions []kalshi.MarketPosition, wide bool) ([]string, [][]string) {
+	headers := []string{"TICKER", "POSITION", "EXPOSURE", "REALIZED_PNL"}
+	if wide {
+		headers = append(headers, "FEES_PAID", "TOTAL_TRADED", "LAST_UPDATED")
+	}
+	rows := make([][]string, 0, len(positions))
+	for _, p := range positions {
+		row := []string{
+			p.Ticker,
+			p.PositionFp,
+			fmtCents(string(p.MarketExposureDollars)),
+			fmtCents(string(p.RealizedPnlDollars)),
+		}
+		if wide {
+			row = append(row,
+				fmtCents(string(p.FeesPaidDollars)),
+				fmtCents(string(p.TotalTradedDollars)),
+				fmtTimeVal(p.LastUpdatedTs),
+			)
+		}
+		rows = append(rows, row)
+	}
+	return headers, rows
+}
+
+func fillsTable(fills []kalshi.Fill, wide bool) ([]string, [][]string) {
+	headers := []string{"TICKER", "SIDE", "ACTION", "PRICE", "COUNT", "CREATED_AT"}
+	if wide {
+		headers = append(headers, "FILL_ID", "ORDER_ID", "FEE_COST", "IS_TAKER")
+	}
+	rows := make([][]string, 0, len(fills))
+	for _, f := range fills {
+		price := fmtCents(string(f.YesPriceDollars))
+		if f.Side == "no" {
+			price = fmtCents(string(f.NoPriceDollars))
+		}
+		row := []string{
+			f.Ticker,
+			string(f.Side),
+			string(f.Action),
+			price,
+			f.CountFp,
+			fmtTime(f.CreatedTime),
+		}
+		if wide {
+			row = append(row,
+				shortID(f.FillId),
+				shortID(f.OrderId),
+				fmtCents(string(f.FeeCost)),
+				fmtBool(f.IsTaker),
+			)
+		}
+		rows = append(rows, row)
+	}
+	return headers, rows
 }

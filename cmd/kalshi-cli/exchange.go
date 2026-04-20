@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -31,7 +30,15 @@ func newExchangeCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 					os.Exit(1)
 				}
-				return prettyPrint(resp.JSON200)
+				s := resp.JSON200
+				return render(s, func(wide bool) ([]string, [][]string) {
+					if wide {
+						return []string{"EXCHANGE", "TRADING", "EST_RESUME"},
+							[][]string{{fmtBool(s.ExchangeActive), fmtBool(s.TradingActive), fmtTime(s.ExchangeEstimatedResumeTime)}}
+					}
+					return []string{"EXCHANGE", "TRADING"},
+						[][]string{{fmtBool(s.ExchangeActive), fmtBool(s.TradingActive)}}
+				})
 			},
 		},
 		&cobra.Command{
@@ -50,15 +57,13 @@ func newExchangeCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 					os.Exit(1)
 				}
-				return prettyPrint(resp.JSON200)
+				l := resp.JSON200
+				return render(l, func(wide bool) ([]string, [][]string) {
+					return []string{"TIER", "READ/s", "WRITE/s"},
+						[][]string{{l.UsageTier, fmt.Sprintf("%d", l.ReadLimit), fmt.Sprintf("%d", l.WriteLimit)}}
+				})
 			},
 		},
 	)
 	return cmd
-}
-
-func prettyPrint(v any) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
 }

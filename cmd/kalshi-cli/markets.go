@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/aptvantage/kalshi-rest-go/kalshi"
 	"github.com/spf13/cobra"
@@ -15,11 +16,10 @@ func newMarketsCmd() *cobra.Command {
 		Short: "Browse markets and order books",
 	}
 
-	// markets list
 	var (
-		listLimit       int
-		listCursor      string
-		listStatus      string
+		listLimit        int
+		listCursor       string
+		listStatus       string
 		listSeriesTicker string
 		listEventTicker  string
 		listTickers      string
@@ -61,7 +61,9 @@ func newMarketsCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 				os.Exit(1)
 			}
-			return prettyPrint(resp.JSON200)
+			return render(resp.JSON200, func(wide bool) ([]string, [][]string) {
+				return marketsTable(resp.JSON200.Markets, wide)
+			})
 		},
 	}
 	listCmd.Flags().IntVar(&listLimit, "limit", 20, "Max number of markets to return")
@@ -71,7 +73,6 @@ func newMarketsCmd() *cobra.Command {
 	listCmd.Flags().StringVar(&listEventTicker, "event-ticker", "", "Filter by event ticker")
 	listCmd.Flags().StringVar(&listTickers, "tickers", "", "Comma-separated list of specific market tickers")
 
-	// markets get <ticker>
 	getCmd := &cobra.Command{
 		Use:   "get <ticker>",
 		Short: "Get a single market by ticker",
@@ -89,11 +90,12 @@ func newMarketsCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 				os.Exit(1)
 			}
-			return prettyPrint(resp.JSON200)
+			return render(resp.JSON200, func(wide bool) ([]string, [][]string) {
+				return marketsTable([]kalshi.Market{resp.JSON200.Market}, wide)
+			})
 		},
 	}
 
-	// markets orderbook <ticker>
 	orderbookCmd := &cobra.Command{
 		Use:   "orderbook <ticker>",
 		Short: "Get order book for a market",
@@ -111,10 +113,83 @@ func newMarketsCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 				os.Exit(1)
 			}
-			return prettyPrint(resp.JSON200)
+			return render(resp.JSON200, func(wide bool) ([]string, [][]string) {
+				return orderbookTable(resp.JSON200.OrderbookFp, wide)
+			})
 		},
 	}
 
 	cmd.AddCommand(listCmd, getCmd, orderbookCmd)
 	return cmd
+}
+
+func marketsTable(markets []kalshi.Market, wide bool) ([]string, [][]string) {
+	headers := []string{"TICKER", "STATUS", "YES_BID", "YES_ASK", "SPREAD", "CLOSE"}
+	if wide {
+		headers = append(headers, "VOL_24H", "OPEN_INT", "LAST", "EVENT")
+	}
+	rows := make([][]string, 0, len(markets))
+	for _, m := range markets {
+		row := []string{
+			m.Ticker,
+			string(m.Status),
+			fmtCents(string(m.YesBidDollars)),
+			fmtCents(string(m.YesAskDollars)),
+			fmtSpread(string(m.YesBidDollars), string(m.YesAskDollars)),
+			fmtTimeVal(m.CloseTime),
+		}
+		if wide {
+			row = append(row,
+				m.Volume24hFp,
+				m.OpenInterestFp,
+				fmtCents(string(m.LastPriceDollars)),
+				m.EventTicker,
+			)
+		}
+		rows = append(rows, row)
+	}
+	return headers, rows
+}
+
+func orderbookTable(ob kalshi.OrderbookCountFp, wide bool) ([]string, [][]string) {
+	headers := []string{"SIDE", "PRICE", "SIZE"}
+	var rows [][]string
+
+	// YES side — sort descending by price (best bid first)
+	yesSide := make([]kalshi.PriceLevelDollarsCountFp, len(ob.YesDollars))
+	copy(yesSide, ob.YesDollars)
+	sort.Slice(yesSide, func(i, j int) bool {
+		return parseFP(yesSide[i][0]) > parseFP(yesSide[j][0])
+	})
+	limit := 5
+	if wide {
+		limit = 10
+	}
+	for i, level := range yesSide {
+		if i >= limit {
+			break
+		}
+		if len(level) < 2 {
+			continue
+		}
+		rows = append(rows, []string{"YES", fmtCents(level[0]), level[1]})
+	}
+
+	// NO side — sort ascending by price (best NO ask first = lowest price)
+	noSide := make([]kalshi.PriceLevelDollarsCountFp, len(ob.NoDollars))
+	copy(noSide, ob.NoDollars)
+	sort.Slice(noSide, func(i, j int) bool {
+		return parseFP(noSide[i][0]) < parseFP(noSide[j][0])
+	})
+	for i, level := range noSide {
+		if i >= limit {
+			break
+		}
+		if len(level) < 2 {
+			continue
+		}
+		rows = append(rows, []string{"NO", fmtCents(level[0]), level[1]})
+	}
+
+	return headers, rows
 }

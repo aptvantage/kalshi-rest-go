@@ -56,7 +56,9 @@ func newOrdersListCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 				os.Exit(1)
 			}
-			return prettyPrint(resp.JSON200)
+			return render(resp.JSON200, func(wide bool) ([]string, [][]string) {
+				return ordersTable(resp.JSON200.Orders, wide)
+			})
 		},
 	}
 	cmd.Flags().StringVar(&ticker, "ticker", "", "Filter by market ticker")
@@ -130,7 +132,9 @@ Example — buy 1 YES contract at 45¢ on a market:
 				fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 				os.Exit(1)
 			}
-			return prettyPrint(resp.JSON201)
+			return render(resp.JSON201, func(wide bool) ([]string, [][]string) {
+				return ordersTable([]kalshi.Order{resp.JSON201.Order}, wide)
+			})
 		},
 	}
 	cmd.Flags().StringVar(&ticker, "ticker", "", "Market ticker (required)")
@@ -161,7 +165,9 @@ func newOrdersGetCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 				os.Exit(1)
 			}
-			return prettyPrint(resp.JSON200)
+			return render(resp.JSON200, func(wide bool) ([]string, [][]string) {
+				return ordersTable([]kalshi.Order{resp.JSON200.Order}, wide)
+			})
 		},
 	}
 }
@@ -184,7 +190,44 @@ func newOrdersCancelCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
 				os.Exit(1)
 			}
-			return prettyPrint(resp.JSON200)
+			return render(resp.JSON200, func(wide bool) ([]string, [][]string) {
+				return ordersTable([]kalshi.Order{resp.JSON200.Order}, wide)
+			})
 		},
 	}
+}
+
+func ordersTable(orders []kalshi.Order, wide bool) ([]string, [][]string) {
+	headers := []string{"ORDER_ID", "TICKER", "SIDE", "ACTION", "STATUS", "PRICE", "INIT", "REMAINING"}
+	if wide {
+		headers = append(headers, "FILLED", "CREATED_AT", "TYPE", "MAKER_FEE", "TAKER_FEE")
+	}
+	rows := make([][]string, 0, len(orders))
+	for _, o := range orders {
+		price := fmtCents(string(o.YesPriceDollars))
+		if o.Side == "no" {
+			price = fmtCents(string(o.NoPriceDollars))
+		}
+		row := []string{
+			shortID(o.OrderId),
+			o.Ticker,
+			string(o.Side),
+			string(o.Action),
+			string(o.Status),
+			price,
+			o.InitialCountFp,
+			o.RemainingCountFp,
+		}
+		if wide {
+			row = append(row,
+				o.FillCountFp,
+				fmtTime(o.CreatedTime),
+				string(o.Type),
+				fmtCents(string(o.MakerFeesDollars)),
+				fmtCents(string(o.TakerFeesDollars)),
+			)
+		}
+		rows = append(rows, row)
+	}
+	return headers, rows
 }
