@@ -1,0 +1,9 @@
+package: kalshi
+generate:
+  client: true
+  models: true
+  strict-server: false
+output: kalshi/kalshi.gen.go
+output-options:
+  skip-prune: false
+  response-type-suffix: HTTPResponse
