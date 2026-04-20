@@ -1,5 +1,7 @@
 # kalshi-rest-go
 
+> **Developer docs:** See [DEVELOPMENT.md](./DEVELOPMENT.md) for build instructions, smoke tests, and SDK regeneration steps.
+
 Go SDK and CLI for the [Kalshi Trade REST API](https://docs.kalshi.com), generated from the official OpenAPI spec.
 
 ## Packages
