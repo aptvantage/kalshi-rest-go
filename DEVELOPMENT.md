@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Go 1.25+** — `go version` to check
+- **Go 1.26.2+** — `go version` to check
 - **oapi-codegen v2** — for SDK regeneration (optional unless updating the spec)
 
 ```bash
