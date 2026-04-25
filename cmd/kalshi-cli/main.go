@@ -9,6 +9,7 @@
 //
 //	KALSHI_KEY_ID      — your API key ID
 //	KALSHI_KEY_FILE    — path to your RSA private key PEM file
+//	KALSHI_PRIVATE_KEY — PEM-encoded RSA private key (alternative to KALSHI_KEY_FILE)
 //
 // Commands: exchange, markets, orders, portfolio
 package main
@@ -40,7 +41,7 @@ func main() {
 	root := &cobra.Command{
 		Use:   "kalshi-cli",
 		Short: "CLI for the Kalshi Trade API",
-		Long:  "Interact with Kalshi's Trade REST API from the command line.\n\nSet KALSHI_KEY_ID and KALSHI_KEY_FILE before use.",
+		Long:  "Interact with Kalshi's Trade REST API from the command line.\n\nSet KALSHI_KEY_ID and either KALSHI_KEY_FILE or KALSHI_PRIVATE_KEY before use.",
 		// Running with no subcommand launches the interactive TUI.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Don't show usage text when RunE returns an error — usage is

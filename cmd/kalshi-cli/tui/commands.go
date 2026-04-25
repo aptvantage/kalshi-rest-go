@@ -20,7 +20,7 @@ if err != nil {
 return AuthFailedMsg{Err: fmt.Errorf("could not reach API: %w", err)}
 }
 if resp.StatusCode() == 401 {
-return AuthFailedMsg{Err: fmt.Errorf("invalid credentials (HTTP 401) — check KALSHI_KEY_ID and KALSHI_KEY_FILE")}
+return AuthFailedMsg{Err: fmt.Errorf("invalid credentials (HTTP 401) — check KALSHI_KEY_ID and KALSHI_KEY_FILE / KALSHI_PRIVATE_KEY")}
 }
 if resp.JSON200 == nil {
 return AuthFailedMsg{Err: fmt.Errorf("unexpected auth response: HTTP %d", resp.StatusCode())}
