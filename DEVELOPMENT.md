@@ -25,7 +25,17 @@ kalshi-rest-go/
 │   ├── events.go           #   events subcommands (list, get)
 │   ├── markets.go          #   markets subcommands (list, get, orderbook)
 │   ├── orders.go           #   orders subcommands
-│   └── portfolio.go        #   portfolio subcommands
+│   ├── portfolio.go        #   portfolio subcommands
+│   └── tui/                #   Interactive terminal UI (Bubble Tea)
+│       ├── model.go        #     Model struct, New(), Init(), table builders
+│       ├── update.go       #     Update() dispatch, navigation, orderbook renderer
+│       ├── view.go         #     View() layout: header / content / status / help
+│       ├── commands.go     #     Async tea.Cmd wrappers for each API call
+│       ├── messages.go     #     Typed Msg structs (SeriesLoadedMsg, etc.)
+│       ├── keys.go         #     Key binding definitions
+│       ├── styles.go       #     Lip Gloss style palette + tableStyles()
+│       └── format.go       #     Display helpers (fmtCents, fmtSpread, …)
+├── kalshi-cli              # Pre-built binary (rebuild with: go build -o kalshi-cli ./cmd/kalshi-cli)
 ├── kalshi.yaml             # Kalshi OpenAPI spec (patched — see below)
 └── oapi-codegen.yaml       # Codegen config
 ```
@@ -33,15 +43,20 @@ kalshi-rest-go/
 ## Building
 
 ```bash
-# Build all packages
+# Build all packages (validates everything compiles)
 go build ./...
 
-# Install the CLI to $GOPATH/bin
+# Build the CLI binary to the repo root (run as ./kalshi-cli)
+go build -o kalshi-cli ./cmd/kalshi-cli
+
+# Install the CLI globally to $GOPATH/bin (run as kalshi-cli from anywhere)
 go install ./cmd/kalshi-cli/...
 
 # Verify
-kalshi-cli --help
+./kalshi-cli --help
 ```
+
+> **Tip:** After any code change, re-run `go build -o kalshi-cli ./cmd/kalshi-cli` to refresh the local binary before testing. The binary in the repo root is not updated automatically.
 
 ## Running the CLI
 
