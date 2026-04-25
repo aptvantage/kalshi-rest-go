@@ -3,6 +3,7 @@
 // Usage:
 //
 //	kalshi-cli [--env prod|demo] <command> [flags]
+//	kalshi-cli                              # launch interactive TUI
 //
 // Authentication is configured via environment variables:
 //
@@ -17,8 +18,11 @@ import (
 	"net/http"
 	"os"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/aptvantage/kalshi-rest-go/auth"
 	"github.com/aptvantage/kalshi-rest-go/kalshi"
+	"github.com/aptvantage/kalshi-rest-go/cmd/kalshi-cli/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -36,6 +40,20 @@ func main() {
 		Use:   "kalshi-cli",
 		Short: "CLI for the Kalshi Trade API",
 		Long:  "Interact with Kalshi's Trade REST API from the command line.\n\nSet KALSHI_KEY_ID and KALSHI_KEY_FILE before use.",
+		// Running with no subcommand launches the interactive TUI.
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := newClient()
+			if err != nil {
+				return fmt.Errorf("TUI requires auth credentials: %w", err)
+			}
+			p := tea.NewProgram(
+				tui.New(client, flagEnv),
+				tea.WithAltScreen(),
+				tea.WithMouseCellMotion(),
+			)
+			_, err = p.Run()
+			return err
+		},
 	}
 
 	root.PersistentFlags().StringVar(&flagEnv, "env", "prod", "API environment: prod or demo")
