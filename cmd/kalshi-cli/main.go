@@ -15,7 +15,6 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 
@@ -63,25 +62,19 @@ func main() {
 				defer f.Close()
 			}
 
-			// Try authenticated client first; fall back to public-only access.
-			// Series, events, markets, and orderbook are all public endpoints.
-			// Balance and order entry require credentials.
-			client, authErr := newClient()
-			authenticated := authErr == nil
-			if !authenticated {
-				var err error
-				client, err = newUnauthClient()
-				if err != nil {
-					return fmt.Errorf("failed to create API client: %w", err)
-				}
+			// Build authenticated client. If credentials are missing or unreadable,
+			// fail before launching the TUI — there's nothing useful to show without auth.
+			client, err := newClient()
+			if err != nil {
+				return fmt.Errorf("cannot create API client: %w", err)
 			}
 
 			p := tea.NewProgram(
-				tui.New(client, flagEnv, authenticated),
+				tui.New(client, flagEnv),
 				tea.WithAltScreen(),
 				tea.WithMouseCellMotion(),
 			)
-			_, err := p.Run()
+			_, err = p.Run()
 			return err
 		},
 	}
@@ -133,10 +126,6 @@ func newClient() (*kalshi.ClientWithResponses, error) {
 	return kalshi.NewClientWithResponses(baseURL(), kalshi.WithHTTPClient(auth.NewClient(signer)))
 }
 
-// newUnauthClient creates an unauthenticated client for public endpoints.
-func newUnauthClient() (*kalshi.ClientWithResponses, error) {
-	return kalshi.NewClientWithResponses(baseURL(), kalshi.WithHTTPClient(&http.Client{}))
-}
 
 func baseURL() string {
 	if flagEnv == "demo" {

@@ -62,7 +62,7 @@ Filter examples:
   kalshi-cli markets list --all --status open --series-ticker KXHIGHNY
   kalshi-cli markets list --mve-filter exclude --status open   # hide combo markets`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := newUnauthClient()
+			client, err := newClient()
 			if err != nil {
 				return err
 			}
@@ -186,7 +186,7 @@ Filter examples:
 		Short: "Get a single market by ticker",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := newUnauthClient()
+			client, err := newClient()
 			if err != nil {
 				return err
 			}
@@ -209,7 +209,7 @@ Filter examples:
 		Short: "Get order book for a market",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := newUnauthClient()
+			client, err := newClient()
 			if err != nil {
 				return err
 			}

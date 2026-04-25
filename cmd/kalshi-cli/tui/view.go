@@ -14,6 +14,9 @@ func (m Model) View() string {
 if m.width == 0 {
 return "loading…"
 }
+if m.authFailed {
+return m.viewAuthFailed()
+}
 return strings.Join([]string{
 m.viewHeader(),
 m.viewContent(),
@@ -55,14 +58,10 @@ envBadge = envDemoStyle.Render("DEMO")
 envBadge = envProdStyle.Render("PROD")
 }
 var bal string
-if m.authenticated {
 if m.balance != nil {
 bal = balanceStyle.Render(fmtDollarsFromCents(*m.balance))
 } else {
 bal = loadStyle.Render("loading…")
-}
-} else {
-bal = errStyle.Render("no auth")
 }
 return bal + "  " + envBadge
 }
@@ -247,10 +246,7 @@ hints = []string{"↑↓  navigate", "⏎  open series", "esc  back", "/  filter
 case ScreenEventsList:
 hints = []string{"↑↓  navigate", "⏎  open event", "esc  back", "/  filter"}
 case ScreenMarketsList:
-hints = []string{"↑↓  navigate", "⏎  orderbook", "esc  back", "/  filter"}
-if m.authenticated {
-hints = append(hints, "o  new order")
-}
+hints = []string{"↑↓  navigate", "⏎  orderbook", "esc  back", "/  filter", "o  new order"}
 case ScreenOrderbook:
 hints = []string{"↑↓  scroll", "esc  back", "q  quit"}
 case ScreenOrderEntry:
@@ -263,6 +259,21 @@ for i, h := range hints {
 parts[i] = helpStyle.Render(h)
 }
 return helpStyle.Width(m.width).Render(strings.Join(parts, "   "))
+}
+
+// viewAuthFailed renders a full-screen auth failure message.
+func (m Model) viewAuthFailed() string {
+title := errStyle.Render("Authentication Failed")
+var msg string
+if m.authErr != nil {
+msg = m.authErr.Error()
+} else {
+msg = "unknown error"
+}
+body := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render(msg)
+hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Set KALSHI_KEY_ID and KALSHI_KEY_FILE, then restart.  q / ctrl+c to quit.")
+lines := strings.Join([]string{"", "  " + title, "", "  " + body, "", "  " + hint, ""}, "\n")
+return lines
 }
 
 // Ensure Model satisfies tea.Model at compile time.

@@ -10,6 +10,42 @@ tea "github.com/charmbracelet/bubbletea"
 "github.com/aptvantage/kalshi-rest-go/kalshi"
 )
 
+// verifyAuth calls the balance endpoint to confirm credentials are valid.
+// On success it returns AuthOKMsg (with the balance so we don't need a second call).
+// On HTTP 401 or any network error it returns AuthFailedMsg.
+func verifyAuth(client *kalshi.ClientWithResponses) tea.Cmd {
+return func() tea.Msg {
+resp, err := client.GetBalanceWithResponse(context.Background(), &kalshi.GetBalanceParams{})
+if err != nil {
+return AuthFailedMsg{Err: fmt.Errorf("could not reach API: %w", err)}
+}
+if resp.StatusCode() == 401 {
+return AuthFailedMsg{Err: fmt.Errorf("invalid credentials (HTTP 401) — check KALSHI_KEY_ID and KALSHI_KEY_FILE")}
+}
+if resp.JSON200 == nil {
+return AuthFailedMsg{Err: fmt.Errorf("unexpected auth response: HTTP %d", resp.StatusCode())}
+}
+return AuthOKMsg{Balance: resp.JSON200.Balance}
+}
+}
+
+// loadBalance refreshes the account balance (used after order placement).
+func loadBalance(client *kalshi.ClientWithResponses) tea.Cmd {
+return func() tea.Msg {
+resp, err := client.GetBalanceWithResponse(context.Background(), &kalshi.GetBalanceParams{})
+if err != nil {
+return ErrMsg{Err: err}
+}
+if resp.StatusCode() == 401 {
+return AuthFailedMsg{Err: fmt.Errorf("session expired (HTTP 401) — please restart")}
+}
+if resp.JSON200 == nil {
+return ErrMsg{Err: fmt.Errorf("balance: HTTP %d", resp.StatusCode())}
+}
+return BalanceLoadedMsg{Balance: resp.JSON200.Balance}
+}
+}
+
 func loadSeries(client *kalshi.ClientWithResponses) tea.Cmd {
 return func() tea.Msg {
 incVol := true
@@ -71,19 +107,6 @@ if resp.JSON200 == nil {
 return ErrMsg{Err: fmt.Errorf("orderbook: HTTP %d", resp.StatusCode())}
 }
 return OrderbookLoadedMsg{Ticker: ticker, Orderbook: resp.JSON200.OrderbookFp}
-}
-}
-
-func loadBalance(client *kalshi.ClientWithResponses) tea.Cmd {
-return func() tea.Msg {
-resp, err := client.GetBalanceWithResponse(context.Background(), &kalshi.GetBalanceParams{})
-if err != nil {
-return ErrMsg{Err: err}
-}
-if resp.JSON200 == nil {
-return ErrMsg{Err: fmt.Errorf("balance: HTTP %d", resp.StatusCode())}
-}
-return BalanceLoadedMsg{Balance: resp.JSON200.Balance}
 }
 }
 

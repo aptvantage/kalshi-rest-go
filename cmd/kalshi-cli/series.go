@@ -37,7 +37,7 @@ Examples:
   kalshi-cli series list --category financials --include-volume
   kalshi-cli series list -o wide`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := newUnauthClient()
+			client, err := newClient()
 			if err != nil {
 				return err
 			}
@@ -83,7 +83,7 @@ Examples:
 		Short: "Get details for a single series",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := newUnauthClient()
+			client, err := newClient()
 			if err != nil {
 				return err
 			}
@@ -114,7 +114,7 @@ Example:
   kalshi-cli series categories
   kalshi-cli series categories -o json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := newUnauthClient()
+			client, err := newClient()
 			if err != nil {
 				return err
 			}

@@ -74,10 +74,23 @@ cmds = append(cmds, tick())
 		log.Printf("[tui] markets loaded: %d markets for event %s", len(msg.Markets), m.selectedEventTicker)
 		m.applyFilter()
 
+	case AuthOKMsg:
+		bal := msg.Balance
+		m.balance = &bal
+		m.loading = false
+		log.Printf("[tui] auth OK: balance=%d cents", bal)
+		return m, tea.Batch(loadSeries(m.client), tick())
+
+	case AuthFailedMsg:
+		m.loading = false
+		m.authFailed = true
+		m.authErr = msg.Err
+		log.Printf("[tui] auth failed: %v", msg.Err)
+
 	case BalanceLoadedMsg:
 		bal := msg.Balance
 		m.balance = &bal
-		log.Printf("[tui] balance loaded: %d cents", bal)
+		log.Printf("[tui] balance refreshed: %d cents", bal)
 
 	case OrderbookLoadedMsg:
 		m.loading = false
@@ -95,20 +108,11 @@ cmds = append(cmds, tick())
 		m.orderForm.result = fmt.Sprintf("✓ Order placed: %s", shortID(msg.Order.OrderId))
 		m.orderForm.err = nil
 		log.Printf("[tui] order created: %s", msg.Order.OrderId)
-		if m.authenticated {
-			cmds = append(cmds, loadBalance(m.client))
-		}
+		cmds = append(cmds, loadBalance(m.client))
 
 	case ErrMsg:
 		m.loading = false
 		log.Printf("[tui] error (screen=%d): %v", m.screen, msg.Err)
-		// A 401 on the balance endpoint means credentials are present but
-		// invalid/expired. Downgrade to unauthenticated rather than surfacing
-		// the error on-screen — the header will show "no auth" instead.
-		if strings.Contains(msg.Err.Error(), "balance:") && strings.Contains(msg.Err.Error(), "401") {
-			m.authenticated = false
-			break
-		}
 		if m.screen == ScreenOrderEntry {
 			m.orderForm.submitting = false
 			m.orderForm.err = msg.Err
@@ -117,6 +121,13 @@ cmds = append(cmds, tick())
 		}
 
 case tea.KeyMsg:
+// When auth has failed the only valid action is quit.
+if m.authFailed {
+if msg.String() == "q" || msg.String() == "ctrl+c" {
+return m, tea.Quit
+}
+return m, nil
+}
 if m.filterMode {
 return m.updateFilterInput(msg)
 }
@@ -167,7 +178,7 @@ return m, m.filterInput.Focus()
 }
 
 case key.Matches(msg, DefaultKeyMap.Order):
-if m.screen == ScreenMarketsList && m.authenticated {
+if m.screen == ScreenMarketsList {
 row := m.marketsTable.SelectedRow()
 if len(row) > 0 {
 m.orderForm = newOrderForm(row[0])

@@ -18,7 +18,7 @@ func newExchangeCmd() *cobra.Command {
 			Use:   "status",
 			Short: "Get exchange status",
 			RunE: func(cmd *cobra.Command, args []string) error {
-				client, err := newUnauthClient()
+				client, err := newClient()
 				if err != nil {
 					return err
 				}

@@ -43,7 +43,7 @@ Examples:
   kalshi-cli events list --series-ticker KXHIGHNY --min-close today
   kalshi-cli events list --series-ticker KXHIGHNY --status open -o wide`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := newUnauthClient()
+			client, err := newClient()
 			if err != nil {
 				return err
 			}
@@ -143,7 +143,7 @@ Examples:
 		Short: "Get details for a single event",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := newUnauthClient()
+			client, err := newClient()
 			if err != nil {
 				return err
 			}

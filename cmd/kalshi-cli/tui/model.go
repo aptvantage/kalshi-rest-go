@@ -88,9 +88,13 @@ focus:      2, // start on count
 // Model is the root Bubble Tea model. All mutable state lives here.
 type Model struct {
 // Infrastructure
-client        *kalshi.ClientWithResponses
-env           string
-authenticated bool // false = no credentials; balance and order features disabled
+client *kalshi.ClientWithResponses
+env    string
+
+// Authentication state. authFailed is set when verifyAuth (or any mid-session
+// call) receives a 401; the TUI shows an error screen and disables all actions.
+authFailed bool
+authErr    error
 
 // Navigation breadcrumb stack (bottom = root, top = current).
 nav    []navEntry
@@ -145,11 +149,9 @@ selectedEventTicker  string
 selectedMarketTicker string
 }
 
-// New creates the initial model.
-// Pass authenticated=false when no API credentials are available; market browsing
-// (categories/series/events/markets/orderbook) still works via public endpoints,
-// but balance display and order entry are disabled.
-func New(client *kalshi.ClientWithResponses, env string, authenticated bool) Model {
+// New creates the initial model. Authentication is verified via verifyAuth during
+// Init(); the TUI will not load data until credentials are confirmed valid.
+func New(client *kalshi.ClientWithResponses, env string) Model {
 sp := spinner.New()
 sp.Spinner = spinner.Dot
 sp.Style = loadStyle
@@ -162,25 +164,19 @@ fi.PromptStyle = filterLabelStyle
 fi.Prompt = "/ "
 
 return Model{
-client:        client,
-env:           env,
-authenticated: authenticated,
-nav:           []navEntry{{label: "categories", screen: ScreenCategories}},
-screen:        ScreenCategories,
-spinner:       sp,
-filterInput:   fi,
-loading:       true,
+client:      client,
+env:         env,
+nav:         []navEntry{{label: "categories", screen: ScreenCategories}},
+screen:      ScreenCategories,
+spinner:     sp,
+filterInput: fi,
+loading:     true,
 }
 }
 
-// Init fires the initial data-loading commands.
-// We load all series upfront; categories are derived from that payload.
+// Init fires verifyAuth first; series and balance load only after auth succeeds.
 func (m Model) Init() tea.Cmd {
-cmds := tea.Batch(loadSeries(m.client), m.spinner.Tick)
-if m.authenticated {
-return tea.Batch(cmds, loadBalance(m.client))
-}
-return cmds
+return tea.Batch(verifyAuth(m.client), m.spinner.Tick)
 }
 
 // --- layout helpers ---
