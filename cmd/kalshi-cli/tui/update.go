@@ -1,249 +1,414 @@
 package tui
 
 import (
-	"fmt"
-	"sort"
-	"strings"
+"fmt"
+"strconv"
+"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+"github.com/charmbracelet/bubbles/key"
+"github.com/charmbracelet/bubbles/spinner"
+"github.com/charmbracelet/bubbles/viewport"
+tea "github.com/charmbracelet/bubbletea"
+"github.com/charmbracelet/lipgloss"
 
-	"github.com/aptvantage/kalshi-rest-go/kalshi"
+"github.com/aptvantage/kalshi-rest-go/kalshi"
 )
 
+// Update processes every message dispatched by the Bubble Tea runtime.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
+var cmds []tea.Cmd
 
-	switch msg := msg.(type) {
+switch msg := msg.(type) {
+case tea.WindowSizeMsg:
+m.width = msg.Width
+m.height = msg.Height
+if len(m.seriesData) > 0 {
+m.applyFilter()
+}
+if m.screen == ScreenOrderbook {
+m.orderbookVP = viewport.New(m.contentWidth()-4, m.contentHeight()-2)
+m.orderbookVP.SetContent(m.obContent)
+}
+return m, nil
 
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m = m.resizeTables()
-		return m, nil
+case spinner.TickMsg:
+var cmd tea.Cmd
+m.spinner, cmd = m.spinner.Update(msg)
+cmds = append(cmds, cmd)
 
-	case tea.KeyMsg:
-		// Global keys — handled before delegating to focused component.
-		switch {
-		case msg.String() == "ctrl+c":
-			return m, tea.Quit
-		case msg.String() == "q" && m.screen == ScreenSeriesList:
-			return m, tea.Quit
-		case msg.String() == "esc":
-			m = m.navigateBack()
-			return m, nil
-		case msg.String() == "r":
-			m.loading = true
-			return m, tea.Batch(m.refreshScreen(), m.spinner.Tick)
-		}
+case TickMsg:
+switch m.screen {
+case ScreenSeriesList:
+cmds = append(cmds, loadSeries(m.client))
+case ScreenEventsList:
+cmds = append(cmds, loadEvents(m.client, m.selectedSeriesTicker))
+case ScreenMarketsList:
+cmds = append(cmds, loadMarkets(m.client, m.selectedEventTicker))
+case ScreenOrderbook:
+cmds = append(cmds, loadOrderbook(m.client, m.selectedMarketTicker))
+}
+cmds = append(cmds, tick())
 
-	case spinner.TickMsg:
-		if m.loading {
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			cmds = append(cmds, cmd)
-		}
-		return m, tea.Batch(cmds...)
+case SeriesLoadedMsg:
+m.loading = false
+m.err = nil
+m.seriesData = msg.Series
+m.applyFilter()
 
-	case SeriesLoadedMsg:
-		m.loading = false
-		m.seriesData = msg.Series
-		m.initSeriesTable(msg.Series)
-		return m, tick()
+case EventsLoadedMsg:
+m.loading = false
+m.err = nil
+m.eventsData = msg.Events
+m.applyFilter()
 
-	case EventsLoadedMsg:
-		m.loading = false
-		m.eventsData = msg.Events
-		m.initEventsTable(msg.Events)
-		m.screen = ScreenEventsList
-		m.nav = appendOrReplace(m.nav, navEntry{
-			label:  m.selectedSeriesTicker,
-			screen: ScreenEventsList,
-		})
-		return m, nil
+case MarketsLoadedMsg:
+m.loading = false
+m.err = nil
+m.marketsData = msg.Markets
+m.applyFilter()
 
-	case MarketsLoadedMsg:
-		m.loading = false
-		m.marketsData = msg.Markets
-		m.initMarketsTable(msg.Markets)
-		m.screen = ScreenMarketsList
-		m.nav = appendOrReplace(m.nav, navEntry{
-			label:  m.selectedEventTicker,
-			screen: ScreenMarketsList,
-		})
-		return m, nil
+case BalanceLoadedMsg:
+bal := msg.Balance
+m.balance = &bal
 
-	case OrderbookLoadedMsg:
-		m.loading = false
-		m.obContent = renderOrderbook(msg.Ticker, msg.Orderbook)
-		m.orderbookVP = viewport.New(m.contentWidth(), m.contentHeight())
-		m.orderbookVP.SetContent(m.obContent)
-		m.screen = ScreenOrderbook
-		m.nav = appendOrReplace(m.nav, navEntry{
-			label:  msg.Ticker,
-			screen: ScreenOrderbook,
-		})
-		return m, nil
+case OrderbookLoadedMsg:
+m.loading = false
+m.err = nil
+content := renderOrderbook(msg.Orderbook, msg.Ticker)
+m.obContent = content
+vp := viewport.New(m.contentWidth()-4, m.contentHeight()-2)
+vp.SetContent(content)
+m.orderbookVP = vp
 
-	case BalanceLoadedMsg:
-		m.balance = &msg.Balance
-		return m, nil
-
-	case TickMsg:
-		// Only auto-refresh the orderbook on tick — it's the most time-sensitive.
-		if m.screen == ScreenOrderbook && m.selectedMarketTicker != "" {
-			m.loading = true
-			return m, tea.Batch(
-				loadOrderbook(m.client, m.selectedMarketTicker),
-				m.spinner.Tick,
-				tick(),
-			)
-		}
-		return m, tick()
-
-	case ErrMsg:
-		m.loading = false
-		m.err = msg.Err
-		return m, nil
-	}
-
-	// Delegate remaining messages to the focused component.
-	return m.updateFocused(msg)
+case OrderCreatedMsg:
+m.orderForm.submitting = false
+m.orderForm.result = fmt.Sprintf("✓ Order placed: %s", shortID(msg.Order.OrderId))
+m.orderForm.err = nil
+if m.authenticated {
+cmds = append(cmds, loadBalance(m.client))
 }
 
-// updateFocused delegates input to whichever component is active.
-func (m Model) updateFocused(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-
-	switch m.screen {
-	case ScreenSeriesList:
-		m.seriesTable, cmd = m.seriesTable.Update(msg)
-		if isEnter(msg) {
-			if row := m.seriesTable.SelectedRow(); len(row) > 0 {
-				m.selectedSeriesTicker = row[0]
-				m.loading = true
-				return m, tea.Batch(cmd, loadEvents(m.client, m.selectedSeriesTicker), m.spinner.Tick)
-			}
-		}
-
-	case ScreenEventsList:
-		m.eventsTable, cmd = m.eventsTable.Update(msg)
-		if isEnter(msg) {
-			if row := m.eventsTable.SelectedRow(); len(row) > 0 {
-				m.selectedEventTicker = row[0]
-				m.loading = true
-				return m, tea.Batch(cmd, loadMarkets(m.client, m.selectedEventTicker), m.spinner.Tick)
-			}
-		}
-
-	case ScreenMarketsList:
-		m.marketsTable, cmd = m.marketsTable.Update(msg)
-		if isEnter(msg) {
-			if row := m.marketsTable.SelectedRow(); len(row) > 0 {
-				m.selectedMarketTicker = row[0]
-				m.loading = true
-				return m, tea.Batch(cmd, loadOrderbook(m.client, m.selectedMarketTicker), m.spinner.Tick)
-			}
-		}
-
-	case ScreenOrderbook:
-		m.orderbookVP, cmd = m.orderbookVP.Update(msg)
-	}
-
-	return m, cmd
+case ErrMsg:
+m.loading = false
+if m.screen == ScreenOrderEntry {
+m.orderForm.submitting = false
+m.orderForm.err = msg.Err
+} else {
+m.err = msg.Err
 }
 
-// navigateBack pops one level from the breadcrumb and restores that screen.
-func (m Model) navigateBack() Model {
-	if len(m.nav) <= 1 {
-		return m
-	}
-	m.nav = m.nav[:len(m.nav)-1]
-	m.screen = m.nav[len(m.nav)-1].screen
-	m.err = nil
-	return m
+case tea.KeyMsg:
+if m.filterMode {
+return m.updateFilterInput(msg)
+}
+return m.updateFocused(msg)
 }
 
-// refreshScreen reloads data for the currently active screen.
-func (m Model) refreshScreen() tea.Cmd {
-	switch m.screen {
-	case ScreenSeriesList:
-		return loadSeries(m.client)
-	case ScreenEventsList:
-		return loadEvents(m.client, m.selectedSeriesTicker)
-	case ScreenMarketsList:
-		return loadMarkets(m.client, m.selectedEventTicker)
-	case ScreenOrderbook:
-		return loadOrderbook(m.client, m.selectedMarketTicker)
-	}
-	return nil
+return m, tea.Batch(cmds...)
 }
 
-// resizeTables updates all component dimensions after a terminal resize.
-func (m Model) resizeTables() Model {
-	h := m.contentHeight() - 2 // table height excludes header row
-	if h < 1 {
-		h = 1
-	}
-	m.seriesTable.SetHeight(h)
-	m.eventsTable.SetHeight(h)
-	m.marketsTable.SetHeight(h)
-	m.orderbookVP.Width = m.contentWidth()
-	m.orderbookVP.Height = m.contentHeight()
-	return m
+// updateFilterInput handles key events when the filter bar is open.
+func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+switch msg.String() {
+case "esc":
+m.filterMode = false
+m.filterQuery = ""
+m.filterInput.SetValue("")
+m.applyFilter()
+return m, nil
+case "enter":
+m.filterMode = false
+m.filterQuery = m.filterInput.Value()
+m.applyFilter()
+return m, nil
+default:
+var cmd tea.Cmd
+m.filterInput, cmd = m.filterInput.Update(msg)
+m.filterQuery = m.filterInput.Value()
+m.applyFilter()
+return m, cmd
+}
 }
 
-// renderOrderbook produces a two-column YES/NO display for the viewport.
-func renderOrderbook(ticker string, ob kalshi.OrderbookCountFp) string {
-	const depth = 8
-	var sb strings.Builder
+// updateFocused handles navigation key events for the focused screen.
+func (m Model) updateFocused(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+var cmds []tea.Cmd
 
-	sb.WriteString(fmt.Sprintf("  Orderbook: %s\n\n", ticker))
-	sb.WriteString(fmt.Sprintf("  %-16s  %s\n", "YES (bids)", "NO (asks)"))
-	sb.WriteString(fmt.Sprintf("  %-16s  %s\n", "──────────────", "──────────────"))
+if m.screen != ScreenOrderEntry {
+switch {
+case key.Matches(msg, DefaultKeyMap.Quit):
+return m, tea.Quit
 
-	// Sort YES descending (best bid first), NO ascending (best ask first).
-	yes := make([]kalshi.PriceLevelDollarsCountFp, len(ob.YesDollars))
-	copy(yes, ob.YesDollars)
-	sort.Slice(yes, func(i, j int) bool { return parseFP(yes[i][0]) > parseFP(yes[j][0]) })
-
-	no := make([]kalshi.PriceLevelDollarsCountFp, len(ob.NoDollars))
-	copy(no, ob.NoDollars)
-	sort.Slice(no, func(i, j int) bool { return parseFP(no[i][0]) < parseFP(no[j][0]) })
-
-	rows := depth
-	if len(yes) > rows {
-		rows = depth
-	}
-	for i := 0; i < rows; i++ {
-		yesCell := "     -      "
-		noCell := "     -      "
-		if i < len(yes) && len(yes[i]) >= 2 {
-			yesCell = fmt.Sprintf("%4s × %-6s", fmtCents(yes[i][0]), yes[i][1])
-		}
-		if i < len(no) && len(no[i]) >= 2 {
-			noCell = fmt.Sprintf("%4s × %-6s", fmtCents(no[i][0]), no[i][1])
-		}
-		sb.WriteString(fmt.Sprintf("  %-16s  %s\n", yesCell, noCell))
-	}
-
-	return sb.String()
+case key.Matches(msg, DefaultKeyMap.Filter):
+if m.screen == ScreenSeriesList ||
+m.screen == ScreenEventsList ||
+m.screen == ScreenMarketsList {
+m.filterMode = true
+m.filterInput.SetValue(m.filterQuery)
+return m, m.filterInput.Focus()
 }
 
-// --- small helpers ---
-
-func isEnter(msg tea.Msg) bool {
-	km, ok := msg.(tea.KeyMsg)
-	return ok && km.String() == "enter"
+case key.Matches(msg, DefaultKeyMap.Order):
+if m.screen == ScreenMarketsList && m.authenticated {
+row := m.marketsTable.SelectedRow()
+if len(row) > 0 {
+m.orderForm = newOrderForm(row[0])
+m.nav = append(m.nav, navEntry{label: "order:" + row[0], screen: ScreenOrderEntry})
+m.screen = ScreenOrderEntry
+return m, m.syncOrderFormFocus()
+}
+}
+}
 }
 
-// appendOrReplace adds nav to the stack, or replaces the top entry if it's
-// the same screen (prevents double-stacking on refresh).
-func appendOrReplace(nav []navEntry, entry navEntry) []navEntry {
-	if len(nav) > 0 && nav[len(nav)-1].screen == entry.screen {
-		nav[len(nav)-1] = entry
-		return nav
-	}
-	return append(nav, entry)
+switch m.screen {
+case ScreenSeriesList:
+switch {
+case key.Matches(msg, DefaultKeyMap.Up):
+m.seriesTable.MoveUp(1)
+case key.Matches(msg, DefaultKeyMap.Down):
+m.seriesTable.MoveDown(1)
+case key.Matches(msg, DefaultKeyMap.Enter):
+row := m.seriesTable.SelectedRow()
+if len(row) > 0 {
+m.selectedSeriesTicker = row[0]
+m.nav = append(m.nav, navEntry{label: row[0], screen: ScreenEventsList})
+m.screen = ScreenEventsList
+m.loading = true
+m.eventsData = nil
+// Clear filter when drilling down.
+m.filterQuery = ""
+m.filterInput.SetValue("")
+cmds = append(cmds, loadEvents(m.client, m.selectedSeriesTicker))
+}
+}
+
+case ScreenEventsList:
+switch {
+case key.Matches(msg, DefaultKeyMap.Up):
+m.eventsTable.MoveUp(1)
+case key.Matches(msg, DefaultKeyMap.Down):
+m.eventsTable.MoveDown(1)
+case key.Matches(msg, DefaultKeyMap.Enter):
+row := m.eventsTable.SelectedRow()
+if len(row) > 0 {
+m.selectedEventTicker = row[0]
+m.nav = append(m.nav, navEntry{label: row[0], screen: ScreenMarketsList})
+m.screen = ScreenMarketsList
+m.loading = true
+m.marketsData = nil
+m.filterQuery = ""
+m.filterInput.SetValue("")
+cmds = append(cmds, loadMarkets(m.client, m.selectedEventTicker))
+}
+case key.Matches(msg, DefaultKeyMap.Back):
+m.navigateBack()
+}
+
+case ScreenMarketsList:
+switch {
+case key.Matches(msg, DefaultKeyMap.Up):
+m.marketsTable.MoveUp(1)
+case key.Matches(msg, DefaultKeyMap.Down):
+m.marketsTable.MoveDown(1)
+case key.Matches(msg, DefaultKeyMap.Enter):
+row := m.marketsTable.SelectedRow()
+if len(row) > 0 {
+m.selectedMarketTicker = row[0]
+m.nav = append(m.nav, navEntry{label: row[0], screen: ScreenOrderbook})
+m.screen = ScreenOrderbook
+m.loading = true
+cmds = append(cmds, loadOrderbook(m.client, m.selectedMarketTicker))
+}
+case key.Matches(msg, DefaultKeyMap.Back):
+m.navigateBack()
+}
+
+case ScreenOrderbook:
+switch {
+case key.Matches(msg, DefaultKeyMap.Quit):
+return m, tea.Quit
+case key.Matches(msg, DefaultKeyMap.Up):
+m.orderbookVP.LineUp(1)
+case key.Matches(msg, DefaultKeyMap.Down):
+m.orderbookVP.LineDown(1)
+case key.Matches(msg, DefaultKeyMap.Back):
+m.navigateBack()
+}
+
+case ScreenOrderEntry:
+return m.updateOrderForm(msg)
+}
+
+return m, tea.Batch(cmds...)
+}
+
+// navigateBack pops the nav stack and resets filter state for the target screen.
+func (m *Model) navigateBack() {
+if len(m.nav) <= 1 {
+return
+}
+m.nav = m.nav[:len(m.nav)-1]
+m.screen = m.nav[len(m.nav)-1].screen
+m.filterMode = false
+m.filterQuery = ""
+m.filterInput.SetValue("")
+}
+
+// updateOrderForm handles key events on the order entry screen.
+func (m Model) updateOrderForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+if m.orderForm.submitting {
+return m, nil
+}
+
+switch msg.String() {
+case "ctrl+c":
+return m, tea.Quit
+case "esc":
+m.navigateBack()
+return m, nil
+case "ctrl+s":
+return m.submitOrderForm()
+case "tab", "down":
+m.orderForm.focus = (m.orderForm.focus + 1) % 7
+return m, m.syncOrderFormFocus()
+case "shift+tab", "up":
+m.orderForm.focus = (m.orderForm.focus + 6) % 7
+return m, m.syncOrderFormFocus()
+case " ":
+switch m.orderForm.focus {
+case 0:
+if m.orderForm.side == "yes" {
+m.orderForm.side = "no"
+} else {
+m.orderForm.side = "yes"
+}
+case 1:
+if m.orderForm.action == "buy" {
+m.orderForm.action = "sell"
+} else {
+m.orderForm.action = "buy"
+}
+case 4:
+m.orderForm.postOnly = !m.orderForm.postOnly
+case 5:
+return m.submitOrderForm()
+case 6:
+m.navigateBack()
+return m, nil
+}
+return m, nil
+case "enter":
+switch m.orderForm.focus {
+case 5:
+return m.submitOrderForm()
+case 6:
+m.navigateBack()
+return m, nil
+default:
+m.orderForm.focus = (m.orderForm.focus + 1) % 7
+return m, m.syncOrderFormFocus()
+}
+}
+
+var cmd tea.Cmd
+switch m.orderForm.focus {
+case 2:
+m.orderForm.countInput, cmd = m.orderForm.countInput.Update(msg)
+case 3:
+m.orderForm.priceInput, cmd = m.orderForm.priceInput.Update(msg)
+}
+return m, cmd
+}
+
+// syncOrderFormFocus focuses/blurs textinputs based on current focus index.
+func (m *Model) syncOrderFormFocus() tea.Cmd {
+var cmds []tea.Cmd
+if m.orderForm.focus == 2 {
+cmds = append(cmds, m.orderForm.countInput.Focus())
+} else {
+m.orderForm.countInput.Blur()
+}
+if m.orderForm.focus == 3 {
+cmds = append(cmds, m.orderForm.priceInput.Focus())
+} else {
+m.orderForm.priceInput.Blur()
+}
+return tea.Batch(cmds...)
+}
+
+// submitOrderForm validates and dispatches the createOrder command.
+func (m Model) submitOrderForm() (tea.Model, tea.Cmd) {
+m.orderForm.result = ""
+m.orderForm.err = nil
+
+countStr := strings.TrimSpace(m.orderForm.countInput.Value())
+priceStr := strings.TrimSpace(m.orderForm.priceInput.Value())
+
+count, err := strconv.Atoi(countStr)
+if err != nil || count <= 0 {
+m.orderForm.err = fmt.Errorf("count must be a positive integer")
+return m, nil
+}
+price, err := strconv.Atoi(priceStr)
+if err != nil || price < 1 || price > 99 {
+m.orderForm.err = fmt.Errorf("price must be 1–99 (cents)")
+return m, nil
+}
+
+m.orderForm.submitting = true
+return m, createOrder(
+m.client,
+m.orderForm.ticker,
+m.orderForm.side,
+m.orderForm.action,
+count,
+price,
+m.orderForm.postOnly,
+)
+}
+
+// renderOrderbook converts a Kalshi OrderbookCountFp to a formatted string.
+func renderOrderbook(ob kalshi.OrderbookCountFp, ticker string) string {
+boldTitle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F3F4F6"))
+askStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+bidStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
+headerRowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+
+var sb strings.Builder
+sb.WriteString(boldTitle.Render("Orderbook: "+ticker) + "\n\n")
+sb.WriteString(headerRowStyle.Render(fmt.Sprintf("  %-10s %-10s  %-10s %-10s", "YES PRICE", "YES QTY", "NO PRICE", "NO QTY")) + "\n")
+sb.WriteString(strings.Repeat("─", 44) + "\n")
+
+maxLen := len(ob.YesDollars)
+if len(ob.NoDollars) > maxLen {
+maxLen = len(ob.NoDollars)
+}
+
+// YES side is asks (sorted descending); NO side is bids.
+for i := 0; i < maxLen; i++ {
+yp, yq := "", ""
+np, nq := "", ""
+if i < len(ob.YesDollars) && len(ob.YesDollars[i]) >= 2 {
+yp = fmtCents(ob.YesDollars[i][0])
+yq = ob.YesDollars[i][1]
+}
+if i < len(ob.NoDollars) && len(ob.NoDollars[i]) >= 2 {
+np = fmtCents(ob.NoDollars[i][0])
+nq = ob.NoDollars[i][1]
+}
+row := fmt.Sprintf("  %-10s %-10s  %-10s %-10s", yp, yq, np, nq)
+if yp != "" {
+sb.WriteString(askStyle.Render(row) + "\n")
+} else {
+sb.WriteString(bidStyle.Render(row) + "\n")
+}
+}
+
+if maxLen == 0 {
+sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Italic(true).Render("  no levels") + "\n")
+}
+
+sb.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("↑/↓ scroll  ·  esc back") + "\n")
+return sb.String()
 }
