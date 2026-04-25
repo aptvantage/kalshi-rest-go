@@ -43,6 +43,8 @@ func main() {
 
 	root.AddCommand(
 		newExchangeCmd(),
+		newSeriesCmd(),
+		newEventsCmd(),
 		newMarketsCmd(),
 		newOrdersCmd(),
 		newPortfolioCmd(),
