@@ -42,14 +42,24 @@ go install github.com/aptvantage/kalshi-rest-go/cmd/kalshi-cli@latest
 ### Commands
 
 ```
-kalshi-cli [--env prod|demo] <command>
+kalshi-cli [--env prod|demo] [-o table|wide|json|yaml] <command>
 
 exchange:
   exchange status          Exchange up/down status (no auth required)
   exchange limits          Your API rate limit tier
 
-markets:
-  markets list             List markets (--series-ticker, --event-ticker, --status, --limit)
+series:                    Browse the contract template hierarchy
+  series categories        List all categories and their tags
+  series list              List series (--category, --tags, --include-volume)
+  series get <ticker>      Get a single series with volume
+
+events:                    Browse dated instances of a series
+  events list              List events (--series-ticker, --status, --min-close, --with-markets)
+  events get <ticker>      Get a single event with its markets inline
+
+markets:                   Browse individual binary contracts
+  markets list             List markets (--series-ticker, --status, --min-close, --max-close,
+                             --search, --mve-filter, --limit, --cursor, --all)
   markets get <ticker>     Get a single market
   markets orderbook <ticker>  Get the order book
 
@@ -65,18 +75,42 @@ orders:
   orders cancel <id>       Cancel an open order
 ```
 
+The three-level hierarchy:
+```
+Series (KXHIGHNY)  →  Event (KXHIGHNY-26APR25)  →  Market (KXHIGHNY-26APR25-T51)
+```
+
+### Browse & discover markets
+
+```bash
+# 1. Find categories and their tags
+kalshi-cli series categories -o wide
+
+# 2. Find series within a category, ranked by volume
+kalshi-cli series list --tags "Daily temperature" --include-volume -o wide
+
+# 3. See open events for a series
+kalshi-cli events list --series-ticker KXHIGHNY --status open
+
+# 4. See all markets inside an event
+kalshi-cli events get KXHIGHNY-26APR25
+
+# 5. Scan open markets across a series for spread/volume
+kalshi-cli markets list --status open --series-ticker KXHIGHNY -o wide
+
+# 6. Drill into a specific market's orderbook
+kalshi-cli markets orderbook KXHIGHNY-26APR25-T51
+```
+
 ### Example: Place and cancel a limit order
 
 ```bash
-# Find a market
-kalshi-cli markets list --series-ticker KXBTCD --limit 10
-
-# Get orderbook
-kalshi-cli markets orderbook KXBTCD-26APR2117-T79499.99
+# Find an active market
+kalshi-cli markets list --series-ticker KXHIGHNY --status open
 
 # Place a resting limit order (YES at 1¢ — far from market, won't fill)
 kalshi-cli orders create \
-  --ticker KXBTCD-26APR2117-T79499.99 \
+  --ticker KXHIGHNY-26APR25-T51 \
   --side yes \
   --action buy \
   --count 1 \

@@ -19,8 +19,11 @@ kalshi-rest-go/
 │   └── kalshi.gen.go       # Generated API client — DO NOT EDIT by hand
 ├── cmd/kalshi-cli/         # CLI entry point
 │   ├── main.go             #   Root command, client factory, env routing
+│   ├── output.go           #   render(), printTable(), printJSON(), printYAML(), format helpers
 │   ├── exchange.go         #   exchange subcommands
-│   ├── markets.go          #   markets subcommands
+│   ├── series.go           #   series subcommands (list, get, categories)
+│   ├── events.go           #   events subcommands (list, get)
+│   ├── markets.go          #   markets subcommands (list, get, orderbook)
 │   ├── orders.go           #   orders subcommands
 │   └── portfolio.go        #   portfolio subcommands
 ├── kalshi.yaml             # Kalshi OpenAPI spec (patched — see below)
@@ -94,21 +97,31 @@ kalshi-cli --env demo portfolio balance
 # 3. API rate limits
 kalshi-cli --env demo exchange limits
 
-# 4. Find an active market
-kalshi-cli --env demo markets list --series-ticker KXBTCD --limit 20
+# 4. Browse categories, then narrow to a series
+kalshi-cli series categories
+kalshi-cli series list --tags "Daily temperature" --include-volume -o wide
 
-# 5. Place a resting limit order (1¢ YES buy — won't fill, safe to test)
+# 5. Find open events and markets for a known series
+kalshi-cli events list --series-ticker KXHIGHNY --status open
+kalshi-cli events get KXHIGHNY-26APR25     # replace with a date returned above
+kalshi-cli markets list --status open --series-ticker KXHIGHNY -o wide
+
+# 6. Orderbook for a specific market
+kalshi-cli markets orderbook KXHIGHNY-26APR25-T51   # replace ticker as needed
+
+# 7. Place a resting limit order (1¢ YES buy — won't fill, safe to test)
 kalshi-cli --env demo orders create \
-  --ticker <ticker-from-step-4> \
+  --ticker <ticker-from-step-5> \
   --side yes --action buy --count 1 --yes-price 1 --post-only
 
-# 6. Cancel it
-kalshi-cli --env demo orders cancel <order-id-from-step-5>
+# 8. Cancel it
+kalshi-cli --env demo orders cancel <order-id-from-step-7>
 ```
 
 Expected results:
 - `exchange status` → `{"exchange_active": true, "trading_active": true}`
 - `portfolio balance` → `{"balance": 50000, ...}` ($500 demo funds)
+- `series categories` → table of 14 categories with tags
 - `orders create` → order with `"status": "resting"`
 - `orders cancel` → same order with `"status": "canceled"`
 
@@ -144,13 +157,20 @@ go build ./...
 
 1. Create or edit the relevant `cmd/kalshi-cli/<group>.go` file
 2. Define a `new<Group><Action>Cmd()` function returning `*cobra.Command`
-3. Call `newClient()` for authenticated endpoints or `newUnauthClient()` for public endpoints
+3. Call `newAuthClient()` for authenticated endpoints or `newUnauthClient()` for public endpoints
 4. Register it in the parent command's `AddCommand(...)` call
-5. Use `prettyPrint(resp.JSON200)` for JSON output consistency
+5. Use `render(resp.JSON200, tableFunc)` for output — it dispatches to table/wide/json/yaml based on `-o`
+
+Output helpers in `output.go`:
+- `render(data, tableFunc)` — dispatch to json/yaml/table based on `-o` flag
+- `printTable(headers, rows)` — tabwriter-aligned table
+- `fmtCents(fixedPoint)` — converts `"0.4500"` → `"45¢"`
+- `fmtTimeVal(t)` / `fmtTime(*t)` — formats timestamps as `MM/DD HH:MMZ`
+- `truncate(s, max)` — truncates strings for table columns
 
 ## Known Issues / Gotchas
 
 - **GPG commit signing**: `git commit` in non-interactive shells (e.g., Copilot tools) times out on GPG pinentry. Workaround: `git -c commit.gpgsign=false commit`.
 - **Demo credentials**: The demo API (`demo-api.kalshi.co`) is live but requires a separate account and API key — production credentials return HTTP 401.
 - **Kalshi spec bug**: The upstream spec uses `x-go-type-skip-optional-pointer: true` on optional bool/string query params but the generated code still emits nil comparisons, causing compile errors. The `kalshi.yaml` in this repo already has these stripped — re-apply the `sed` command after any spec update.
-- **MVE markets dominate default list**: `markets list` without filters returns multivariate/combo markets by default. Use `--series-ticker` (e.g., `KXBTCD`) to get standard single-leg markets.
+- **MVE markets dominate default list**: `markets list` without filters returns multivariate/combo markets by default. Use `--mve-filter exclude` or `--series-ticker` (e.g., `KXHIGHNY`) to get standard single-leg markets.
