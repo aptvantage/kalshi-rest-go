@@ -54,7 +54,8 @@ series:                    Browse the contract template hierarchy
   series get <ticker>      Get a single series with volume
 
 events:                    Browse dated instances of a series
-  events list              List events (--series-ticker, --status, --min-close, --with-markets)
+  events list              List events (--series-ticker, --status, --min-close,
+                             --with-markets, --all, --cursor, --limit)
   events get <ticker>      Get a single event with its markets inline
 
 markets:                   Browse individual binary contracts
