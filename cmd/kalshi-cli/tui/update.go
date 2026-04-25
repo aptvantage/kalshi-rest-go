@@ -38,6 +38,8 @@ cmds = append(cmds, cmd)
 
 case TickMsg:
 switch m.screen {
+case ScreenCategories:
+cmds = append(cmds, loadSeries(m.client))
 case ScreenSeriesList:
 cmds = append(cmds, loadSeries(m.client))
 case ScreenEventsList:
@@ -53,6 +55,7 @@ case SeriesLoadedMsg:
 m.loading = false
 m.err = nil
 m.seriesData = msg.Series
+m.buildCategoryRows()
 m.applyFilter()
 
 case EventsLoadedMsg:
@@ -140,9 +143,8 @@ case key.Matches(msg, DefaultKeyMap.Quit):
 return m, tea.Quit
 
 case key.Matches(msg, DefaultKeyMap.Filter):
-if m.screen == ScreenSeriesList ||
-m.screen == ScreenEventsList ||
-m.screen == ScreenMarketsList {
+switch m.screen {
+case ScreenCategories, ScreenSeriesList, ScreenEventsList, ScreenMarketsList:
 m.filterMode = true
 m.filterInput.SetValue(m.filterQuery)
 return m, m.filterInput.Focus()
@@ -162,6 +164,31 @@ return m, m.syncOrderFormFocus()
 }
 
 switch m.screen {
+case ScreenCategories:
+switch {
+case key.Matches(msg, DefaultKeyMap.Up):
+m.categoriesTable.MoveUp(1)
+case key.Matches(msg, DefaultKeyMap.Down):
+m.categoriesTable.MoveDown(1)
+case key.Matches(msg, DefaultKeyMap.Enter):
+row := m.categoriesTable.SelectedRow()
+if len(row) > 0 {
+// row[0] is "(all)" or a real category name.
+catName := row[0]
+if catName == "(all)" {
+m.categoryFilter = ""
+m.nav = append(m.nav, navEntry{label: "all series", screen: ScreenSeriesList})
+} else {
+m.categoryFilter = catName
+m.nav = append(m.nav, navEntry{label: catName, screen: ScreenSeriesList})
+}
+m.screen = ScreenSeriesList
+m.filterQuery = ""
+m.filterInput.SetValue("")
+m.applyFilter()
+}
+}
+
 case ScreenSeriesList:
 switch {
 case key.Matches(msg, DefaultKeyMap.Up):
@@ -176,11 +203,12 @@ m.nav = append(m.nav, navEntry{label: row[0], screen: ScreenEventsList})
 m.screen = ScreenEventsList
 m.loading = true
 m.eventsData = nil
-// Clear filter when drilling down.
 m.filterQuery = ""
 m.filterInput.SetValue("")
 cmds = append(cmds, loadEvents(m.client, m.selectedSeriesTicker))
 }
+case key.Matches(msg, DefaultKeyMap.Back):
+m.navigateBack()
 }
 
 case ScreenEventsList:
@@ -243,7 +271,7 @@ return m.updateOrderForm(msg)
 return m, tea.Batch(cmds...)
 }
 
-// navigateBack pops the nav stack and resets filter state for the target screen.
+// navigateBack pops the nav stack and resets filter state.
 func (m *Model) navigateBack() {
 if len(m.nav) <= 1 {
 return
@@ -253,6 +281,8 @@ m.screen = m.nav[len(m.nav)-1].screen
 m.filterMode = false
 m.filterQuery = ""
 m.filterInput.SetValue("")
+// Rebuild the table we're returning to.
+m.applyFilter()
 }
 
 // updateOrderForm handles key events on the order entry screen.
@@ -378,14 +408,13 @@ headerRowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
 var sb strings.Builder
 sb.WriteString(boldTitle.Render("Orderbook: "+ticker) + "\n\n")
 sb.WriteString(headerRowStyle.Render(fmt.Sprintf("  %-10s %-10s  %-10s %-10s", "YES PRICE", "YES QTY", "NO PRICE", "NO QTY")) + "\n")
-sb.WriteString(strings.Repeat("─", 44) + "\n")
+sb.WriteString(strings.Repeat("─", 46) + "\n")
 
 maxLen := len(ob.YesDollars)
 if len(ob.NoDollars) > maxLen {
 maxLen = len(ob.NoDollars)
 }
 
-// YES side is asks (sorted descending); NO side is bids.
 for i := 0; i < maxLen; i++ {
 yp, yq := "", ""
 np, nq := "", ""

@@ -70,19 +70,16 @@ return bal + "  " + envBadge
 // ---- content ----
 
 func (m Model) viewContent() string {
-h := m.contentHeight()
-
 var parts []string
 
 // Filter bar (shown when filter mode is active OR a query is set).
 if m.filterMode || m.filterQuery != "" {
 parts = append(parts, m.viewFilterBar())
-h-- // consumed one line
 }
 
 switch m.screen {
-case ScreenSeriesList, ScreenEventsList, ScreenMarketsList:
-parts = append(parts, m.viewTable(h))
+case ScreenCategories, ScreenSeriesList, ScreenEventsList, ScreenMarketsList:
+parts = append(parts, m.viewTable())
 case ScreenOrderbook:
 parts = append(parts, orderbookStyle.Render(m.orderbookVP.View()))
 case ScreenOrderEntry:
@@ -107,16 +104,16 @@ lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("(/ edit · esc
 return filterBarStyle.Width(m.width).Render(content)
 }
 
-func (m Model) viewTable(height int) string {
+func (m Model) viewTable() string {
 if m.loading {
 return contentPad.Render(m.spinner.View() + "  loading…")
 }
 if m.err != nil {
 return contentPad.Render(errStyle.Render("Error: " + m.err.Error()))
 }
-
-_ = height // table handles its own height
 switch m.screen {
+case ScreenCategories:
+return m.categoriesTable.View()
 case ScreenSeriesList:
 return m.seriesTable.View()
 case ScreenEventsList:
@@ -167,18 +164,12 @@ title := formTitleStyle.Render("New Order")
 ticker := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render(f.ticker)
 sb.WriteString(fmt.Sprintf("  %s  %s\n\n", title, ticker))
 
-// Side (0)
-sb.WriteString(fmt.Sprintf("%sside    %s\n", cursor(0), toggle(0, f.side)))
-// Action (1)
-sb.WriteString(fmt.Sprintf("%saction  %s\n", cursor(1), toggle(1, f.action)))
-// Count (2)
-sb.WriteString(fmt.Sprintf("%scount   %s\n", cursor(2), active(2, f.countInput.View())))
-// Price (3)
-sb.WriteString(fmt.Sprintf("%sprice   %s ¢\n", cursor(3), active(3, f.priceInput.View())))
-// Post-Only (4)
+sb.WriteString(fmt.Sprintf("%sside      %s\n", cursor(0), toggle(0, f.side)))
+sb.WriteString(fmt.Sprintf("%saction    %s\n", cursor(1), toggle(1, f.action)))
+sb.WriteString(fmt.Sprintf("%scount     %s\n", cursor(2), active(2, f.countInput.View())))
+sb.WriteString(fmt.Sprintf("%sprice     %s ¢\n", cursor(3), active(3, f.priceInput.View())))
 sb.WriteString(fmt.Sprintf("%spost-only %s\n\n", cursor(4), checkbox(4, f.postOnly)))
 
-// Submit / Cancel (5, 6)
 var submitBtn, cancelBtn string
 if f.submitting {
 submitBtn = loadStyle.Render("submitting…")
@@ -194,7 +185,6 @@ cancelBtn = "[ Cancel ]"
 }
 sb.WriteString(fmt.Sprintf("  %s  %s\n", submitBtn, cancelBtn))
 
-// Result / error feedback.
 if f.result != "" {
 sb.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Render(f.result) + "\n")
 }
@@ -211,9 +201,16 @@ func (m Model) viewStatusBar() string {
 var parts []string
 
 switch m.screen {
+case ScreenCategories:
+n := len(m.categoriesTable.Rows())
+parts = append(parts, fmt.Sprintf("%d categories", n))
 case ScreenSeriesList:
 n := len(m.seriesTable.Rows())
-parts = append(parts, fmt.Sprintf("%d series", n))
+label := "series"
+if m.categoryFilter != "" {
+label = fmt.Sprintf("series in %q", m.categoryFilter)
+}
+parts = append(parts, fmt.Sprintf("%d %s", n, label))
 case ScreenEventsList:
 n := len(m.eventsTable.Rows())
 parts = append(parts, fmt.Sprintf("%d events", n))
@@ -240,12 +237,18 @@ func (m Model) viewHelpBar() string {
 var hints []string
 
 if m.filterMode {
-hints = []string{"enter  apply", "esc  clear filter", "type to filter"}
+hints = []string{"type to filter", "enter  apply", "esc  clear"}
 } else {
 switch m.screen {
-case ScreenSeriesList, ScreenEventsList, ScreenMarketsList:
-hints = []string{"↑↓  navigate", "⏎  open", "esc  back", "/  filter"}
-if m.screen == ScreenMarketsList && m.authenticated {
+case ScreenCategories:
+hints = []string{"↑↓  navigate", "⏎  open category", "/  search tags"}
+case ScreenSeriesList:
+hints = []string{"↑↓  navigate", "⏎  open series", "esc  back", "/  filter (ticker/title/tags)"}
+case ScreenEventsList:
+hints = []string{"↑↓  navigate", "⏎  open event", "esc  back", "/  filter"}
+case ScreenMarketsList:
+hints = []string{"↑↓  navigate", "⏎  orderbook", "esc  back", "/  filter"}
+if m.authenticated {
 hints = append(hints, "o  new order")
 }
 case ScreenOrderbook:
@@ -255,9 +258,9 @@ hints = []string{"tab  next field", "space  toggle", "ctrl+s  submit", "esc  bac
 }
 }
 
-var parts []string
-for _, h := range hints {
-parts = append(parts, helpStyle.Render(h))
+parts := make([]string, len(hints))
+for i, h := range hints {
+parts[i] = helpStyle.Render(h)
 }
 return helpStyle.Width(m.width).Render(strings.Join(parts, "   "))
 }

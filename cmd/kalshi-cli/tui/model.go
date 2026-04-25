@@ -1,13 +1,17 @@
 // Package tui implements the interactive terminal UI for kalshi-cli.
 //
-// Navigation hierarchy mirrors the Kalshi data model:
+// Navigation hierarchy:
 //
-//Series  →  Events  →  Markets  →  Orderbook
+//Categories  →  Series (filtered)  →  Events  →  Markets  →  Orderbook
+//
+// Categories are derived client-side from the loaded series data, so there is
+// no extra API call. The categories screen is the TUI root.
 //
 // Launch with tea.NewProgram(tui.New(client, env, authenticated), tea.WithAltScreen()).
 package tui
 
 import (
+"sort"
 "strings"
 
 "github.com/charmbracelet/bubbles/spinner"
@@ -23,17 +27,25 @@ tea "github.com/charmbracelet/bubbletea"
 type Screen int
 
 const (
-ScreenSeriesList Screen = iota
-ScreenEventsList
-ScreenMarketsList
-ScreenOrderbook
-ScreenOrderEntry
+ScreenCategories  Screen = iota // root: browse categories derived from series
+ScreenSeriesList                // series filtered by selected category (or all)
+ScreenEventsList                // open events for a series
+ScreenMarketsList               // markets inside an event
+ScreenOrderbook                 // scrollable orderbook for a market
+ScreenOrderEntry                // order entry form
 )
 
 // navEntry is one breadcrumb step.
 type navEntry struct {
 label  string
 screen Screen
+}
+
+// categoryRow is a derived row built from loaded series data.
+type categoryRow struct {
+name        string   // category name, or "" for "All"
+seriesCount int      // number of series in this category
+tags        []string // unique tags across all series in this category
 }
 
 // orderForm holds TUI-level state for the order entry form.
@@ -92,16 +104,23 @@ seriesData  []kalshi.Series
 eventsData  []kalshi.EventData
 marketsData []kalshi.Market
 
+// Derived category rows (rebuilt after seriesData loads).
+categoryRows []categoryRow
+
+// Active category filter ("" = all series visible).
+categoryFilter string
+
 // Table models — one per hierarchy level.
-seriesTable  table.Model
-eventsTable  table.Model
-marketsTable table.Model
+categoriesTable table.Model
+seriesTable     table.Model
+eventsTable     table.Model
+marketsTable    table.Model
 
 // Orderbook viewport (scrollable text).
 orderbookVP viewport.Model
 obContent   string // pre-rendered orderbook text
 
-// Client-side row filter.
+// Client-side row filter (/ key).
 filterInput textinput.Model
 filterMode  bool   // true = textinput is open and focused
 filterQuery string // active query (persists after closing the input bar)
@@ -128,8 +147,8 @@ selectedMarketTicker string
 
 // New creates the initial model.
 // Pass authenticated=false when no API credentials are available; market browsing
-// (series/events/markets/orderbook) still works via public endpoints, but balance
-// display and order entry are disabled.
+// (categories/series/events/markets/orderbook) still works via public endpoints,
+// but balance display and order entry are disabled.
 func New(client *kalshi.ClientWithResponses, env string, authenticated bool) Model {
 sp := spinner.New()
 sp.Spinner = spinner.Dot
@@ -146,8 +165,8 @@ return Model{
 client:        client,
 env:           env,
 authenticated: authenticated,
-nav:           []navEntry{{label: "series", screen: ScreenSeriesList}},
-screen:        ScreenSeriesList,
+nav:           []navEntry{{label: "categories", screen: ScreenCategories}},
+screen:        ScreenCategories,
 spinner:       sp,
 filterInput:   fi,
 loading:       true,
@@ -155,6 +174,7 @@ loading:       true,
 }
 
 // Init fires the initial data-loading commands.
+// We load all series upfront; categories are derived from that payload.
 func (m Model) Init() tea.Cmd {
 cmds := tea.Batch(loadSeries(m.client), m.spinner.Tick)
 if m.authenticated {
@@ -163,13 +183,13 @@ return tea.Batch(cmds, loadBalance(m.client))
 return cmds
 }
 
-// --- helpers ---
+// --- layout helpers ---
 
 func (m Model) contentHeight() int {
 if m.height < 4 {
 return 1
 }
-return m.height - 3 // header (1) + status bar (1) + help bar (1)
+return m.height - 3 // header(1) + status bar(1) + help bar(1)
 }
 
 func (m Model) contentWidth() int {
@@ -179,22 +199,102 @@ return 40
 return m.width
 }
 
-// applyFilter rebuilds the current screen's table rows from raw data, keeping only
-// rows whose text columns contain filterQuery (case-insensitive).
+// --- category derivation ---
+
+// buildCategoryRows rebuilds categoryRows from the current seriesData.
+// The first row is always "All" (no filter).
+func (m *Model) buildCategoryRows() {
+// Gather categories and their tags.
+catMap := make(map[string]map[string]struct{})
+catCount := make(map[string]int)
+for _, s := range m.seriesData {
+cat := s.Category
+if catMap[cat] == nil {
+catMap[cat] = make(map[string]struct{})
+}
+catCount[cat]++
+for _, t := range s.Tags {
+catMap[cat][t] = struct{}{}
+}
+}
+
+// Sort categories alphabetically.
+cats := make([]string, 0, len(catMap))
+for c := range catMap {
+cats = append(cats, c)
+}
+sort.Strings(cats)
+
+rows := make([]categoryRow, 0, len(cats)+1)
+// "All" meta-row.
+allTags := make(map[string]struct{})
+for _, tagSet := range catMap {
+for t := range tagSet {
+allTags[t] = struct{}{}
+}
+}
+rows = append(rows, categoryRow{
+name:        "",
+seriesCount: len(m.seriesData),
+tags:        sortedKeys(allTags),
+})
+for _, c := range cats {
+rows = append(rows, categoryRow{
+name:        c,
+seriesCount: catCount[c],
+tags:        sortedKeys(catMap[c]),
+})
+}
+m.categoryRows = rows
+}
+
+func sortedKeys(m map[string]struct{}) []string {
+keys := make([]string, 0, len(m))
+for k := range m {
+keys = append(keys, k)
+}
+sort.Strings(keys)
+return keys
+}
+
+// --- filter / table builders ---
+
+// applyFilter rebuilds the current screen's table rows filtered by filterQuery.
 func (m *Model) applyFilter() {
 q := strings.ToLower(m.filterQuery)
 switch m.screen {
+case ScreenCategories:
+filtered := make([]categoryRow, 0, len(m.categoryRows))
+for _, r := range m.categoryRows {
+label := r.name
+if label == "" {
+label = "all"
+}
+if q == "" ||
+strings.Contains(strings.ToLower(label), q) ||
+containsTag(r.tags, q) {
+filtered = append(filtered, r)
+}
+}
+m.initCategoriesTable(filtered)
+
 case ScreenSeriesList:
 filtered := make([]kalshi.Series, 0, len(m.seriesData))
 for _, s := range m.seriesData {
+// Category gate: only show series matching the active category filter.
+if m.categoryFilter != "" && s.Category != m.categoryFilter {
+continue
+}
 if q == "" ||
 strings.Contains(strings.ToLower(s.Ticker), q) ||
 strings.Contains(strings.ToLower(s.Title), q) ||
-strings.Contains(strings.ToLower(s.Category), q) {
+strings.Contains(strings.ToLower(s.Category), q) ||
+containsTag(s.Tags, q) {
 filtered = append(filtered, s)
 }
 }
 m.initSeriesTable(filtered)
+
 case ScreenEventsList:
 filtered := make([]kalshi.EventData, 0, len(m.eventsData))
 for _, e := range m.eventsData {
@@ -205,6 +305,7 @@ filtered = append(filtered, e)
 }
 }
 m.initEventsTable(filtered)
+
 case ScreenMarketsList:
 filtered := make([]kalshi.Market, 0, len(m.marketsData))
 for _, mkt := range m.marketsData {
@@ -218,19 +319,88 @@ m.initMarketsTable(filtered)
 }
 }
 
-// initSeriesTable builds the series table using current terminal dimensions.
+// containsTag returns true if any tag in tags contains the query string.
+func containsTag(tags []string, q string) bool {
+for _, t := range tags {
+if strings.Contains(strings.ToLower(t), q) {
+return true
+}
+}
+return false
+}
+
+// --- table initializers ---
+
+func (m *Model) initCategoriesTable(rows []categoryRow) {
+w := m.contentWidth()
+tagsW := w - 14 - 8 - 4
+if tagsW < 20 {
+tagsW = 20
+}
+cols := []table.Column{
+{Title: "CATEGORY", Width: 14},
+{Title: "SERIES", Width: 8},
+{Title: "TAGS", Width: tagsW},
+}
+trows := make([]table.Row, 0, len(rows))
+for _, r := range rows {
+name := r.name
+if name == "" {
+name = "(all)"
+}
+trows = append(trows, table.Row{
+name,
+strings.NewReplacer().Replace(formatInt(r.seriesCount)),
+truncate(strings.Join(r.tags, ", "), tagsW),
+})
+}
+t := table.New(
+table.WithColumns(cols),
+table.WithRows(trows),
+table.WithFocused(true),
+table.WithHeight(m.contentHeight()-2),
+)
+t.SetStyles(tableStyles())
+m.categoriesTable = t
+}
+
+func formatInt(n int) string {
+return strings.TrimRight(strings.TrimRight(
+func() string {
+if n == 0 {
+return "0"
+}
+result := ""
+neg := n < 0
+if neg {
+n = -n
+}
+for n > 0 {
+result = string(rune('0'+n%10)) + result
+n /= 10
+}
+if neg {
+result = "-" + result
+}
+return result
+}(),
+""), "")
+}
+
 func (m *Model) initSeriesTable(series []kalshi.Series) {
 w := m.contentWidth()
 tickerW := 14
-titleW := w - tickerW - 12 - 12 - 4
-if titleW < 20 {
-titleW = 20
+tagsW := 20
+titleW := w - tickerW - tagsW - 12 - 12 - 6
+if titleW < 16 {
+titleW = 16
 }
 cols := []table.Column{
 {Title: "TICKER", Width: tickerW},
 {Title: "TITLE", Width: titleW},
 {Title: "CATEGORY", Width: 12},
-{Title: "FREQUENCY", Width: 10},
+{Title: "FREQ", Width: 8},
+{Title: "TAGS", Width: tagsW},
 }
 rows := make([]table.Row, 0, len(series))
 for _, s := range series {
@@ -239,6 +409,7 @@ s.Ticker,
 truncate(s.Title, titleW),
 s.Category,
 s.Frequency,
+truncate(strings.Join(s.Tags, ", "), tagsW),
 })
 }
 t := table.New(
@@ -251,7 +422,6 @@ t.SetStyles(tableStyles())
 m.seriesTable = t
 }
 
-// initEventsTable builds the events table using current terminal dimensions.
 func (m *Model) initEventsTable(events []kalshi.EventData) {
 w := m.contentWidth()
 subW := w - 24 - 14 - 4
@@ -287,7 +457,6 @@ t.SetStyles(tableStyles())
 m.eventsTable = t
 }
 
-// initMarketsTable builds the markets table using current terminal dimensions.
 func (m *Model) initMarketsTable(markets []kalshi.Market) {
 cols := []table.Column{
 {Title: "TICKER", Width: 24},
