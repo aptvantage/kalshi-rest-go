@@ -102,6 +102,13 @@ cmds = append(cmds, tick())
 	case ErrMsg:
 		m.loading = false
 		log.Printf("[tui] error (screen=%d): %v", m.screen, msg.Err)
+		// A 401 on the balance endpoint means credentials are present but
+		// invalid/expired. Downgrade to unauthenticated rather than surfacing
+		// the error on-screen — the header will show "no auth" instead.
+		if strings.Contains(msg.Err.Error(), "balance:") && strings.Contains(msg.Err.Error(), "401") {
+			m.authenticated = false
+			break
+		}
 		if m.screen == ScreenOrderEntry {
 			m.orderForm.submitting = false
 			m.orderForm.err = msg.Err
