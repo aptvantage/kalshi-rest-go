@@ -5,10 +5,31 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/aptvantage/kalshi-rest-go/kalshi"
 	"github.com/spf13/cobra"
 )
+
+// parseDate accepts "today", "tomorrow", or "YYYY-MM-DD" and returns a Unix timestamp.
+func parseDate(s string) (int64, error) {
+	now := time.Now()
+	switch strings.ToLower(s) {
+	case "today":
+		y, m, d := now.Date()
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix(), nil
+	case "tomorrow":
+		y, m, d := now.AddDate(0, 0, 1).Date()
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix(), nil
+	default:
+		t, err := time.ParseInLocation("2006-01-02", s, time.UTC)
+		if err != nil {
+			return 0, fmt.Errorf("invalid date %q: use YYYY-MM-DD, 'today', or 'tomorrow'", s)
+		}
+		return t.Unix(), nil
+	}
+}
 
 func newMarketsCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -23,22 +44,36 @@ func newMarketsCmd() *cobra.Command {
 		listSeriesTicker string
 		listEventTicker  string
 		listTickers      string
+		listMinClose     string
+		listMaxClose     string
+		listMveFilter    string
+		listSearch       string
+		listAll          bool
 	)
 	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List markets",
+		Long: `List markets with optional filters.
+
+Filter examples:
+  kalshi-cli markets list --status open --series-ticker KXBTCD
+  kalshi-cli markets list --status open --min-close today --max-close 2026-05-01
+  kalshi-cli markets list --search "NYC" --status open
+  kalshi-cli markets list --all --status open --series-ticker KXHIGHNY
+  kalshi-cli markets list --mve-filter exclude --status open   # hide combo markets`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := newUnauthClient()
 			if err != nil {
 				return err
 			}
+
 			params := kalshi.GetMarketsParams{}
-			if listLimit > 0 {
-				lim := kalshi.MarketLimitQuery(listLimit)
-				params.Limit = &lim
-			}
+			lim := kalshi.MarketLimitQuery(listLimit)
+			params.Limit = &lim
+
 			if listCursor != "" {
-				params.Cursor = &listCursor
+				c := kalshi.CursorQuery(listCursor)
+				params.Cursor = &c
 			}
 			if listStatus != "" {
 				s := kalshi.GetMarketsParamsStatus(listStatus)
@@ -53,25 +88,98 @@ func newMarketsCmd() *cobra.Command {
 			if listTickers != "" {
 				params.Tickers = &listTickers
 			}
-			resp, err := client.GetMarketsWithResponse(context.Background(), &params)
-			if err != nil {
-				return fmt.Errorf("request failed: %w", err)
+			if listMinClose != "" {
+				ts, err := parseDate(listMinClose)
+				if err != nil {
+					return err
+				}
+				mcts := kalshi.MinCloseTsQuery(ts)
+				params.MinCloseTs = &mcts
 			}
-			if resp.StatusCode() != 200 {
-				fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
-				os.Exit(1)
+			if listMaxClose != "" {
+				ts, err := parseDate(listMaxClose)
+				if err != nil {
+					return err
+				}
+				mcts := kalshi.MaxCloseTsQuery(ts)
+				params.MaxCloseTs = &mcts
 			}
-			return render(resp.JSON200, func(wide bool) ([]string, [][]string) {
-				return marketsTable(resp.JSON200.Markets, wide)
-			})
+			if listMveFilter != "" {
+				f := kalshi.GetMarketsParamsMveFilter(listMveFilter)
+				params.MveFilter = &f
+			}
+
+			search := strings.ToLower(listSearch)
+
+			// Collect pages; loop only when --all is set.
+			var allMarkets []kalshi.Market
+			var nextCursor string
+			for {
+				resp, err := client.GetMarketsWithResponse(context.Background(), &params)
+				if err != nil {
+					return fmt.Errorf("request failed: %w", err)
+				}
+				if resp.StatusCode() != 200 {
+					fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode(), string(resp.Body))
+					os.Exit(1)
+				}
+				page := resp.JSON200.Markets
+				if search != "" {
+					filtered := page[:0]
+					for _, m := range page {
+						if strings.Contains(strings.ToLower(m.Ticker), search) ||
+							strings.Contains(strings.ToLower(m.YesSubTitle), search) ||
+							strings.Contains(strings.ToLower(m.NoSubTitle), search) {
+							filtered = append(filtered, m)
+						}
+					}
+					page = filtered
+				}
+				allMarkets = append(allMarkets, page...)
+				nextCursor = resp.JSON200.Cursor
+				if !listAll || nextCursor == "" {
+					break
+				}
+				c := kalshi.CursorQuery(nextCursor)
+				params.Cursor = &c
+				time.Sleep(300 * time.Millisecond) // avoid rate limiting during auto-pagination
+			}
+
+			// For structured output use the last raw response; for table render all collected markets.
+			switch flagOutput {
+			case "json", "yaml":
+				type marketsResult struct {
+					Markets []kalshi.Market `json:"markets"`
+					Cursor  string          `json:"cursor,omitempty"`
+				}
+				return render(marketsResult{Markets: allMarkets, Cursor: nextCursor}, func(wide bool) ([]string, [][]string) {
+					return marketsTable(allMarkets, wide)
+				})
+			default:
+				headers, rows := marketsTable(allMarkets, isWide())
+				if err := printTable(headers, rows); err != nil {
+					return err
+				}
+				if nextCursor != "" {
+					fmt.Fprintf(os.Stderr, "\n# %d markets shown. More available — next page: --cursor %s\n", len(allMarkets), nextCursor)
+				} else {
+					fmt.Fprintf(os.Stderr, "\n# %d markets\n", len(allMarkets))
+				}
+				return nil
+			}
 		},
 	}
-	listCmd.Flags().IntVar(&listLimit, "limit", 20, "Max number of markets to return")
-	listCmd.Flags().StringVar(&listCursor, "cursor", "", "Pagination cursor")
-	listCmd.Flags().StringVar(&listStatus, "status", "", "Market status filter: open, closed, settled")
+	listCmd.Flags().IntVar(&listLimit, "limit", 100, "Max markets per page (1–1000, default 100)")
+	listCmd.Flags().BoolVar(&listAll, "all", false, "Fetch all pages automatically (ignores --cursor)")
+	listCmd.Flags().StringVar(&listCursor, "cursor", "", "Pagination cursor from previous response")
+	listCmd.Flags().StringVar(&listStatus, "status", "", "Market status: open, closed, settled, paused, unopened")
 	listCmd.Flags().StringVar(&listSeriesTicker, "series-ticker", "", "Filter by series ticker (e.g. KXBTCD)")
 	listCmd.Flags().StringVar(&listEventTicker, "event-ticker", "", "Filter by event ticker")
-	listCmd.Flags().StringVar(&listTickers, "tickers", "", "Comma-separated list of specific market tickers")
+	listCmd.Flags().StringVar(&listTickers, "tickers", "", "Comma-separated market tickers")
+	listCmd.Flags().StringVar(&listMinClose, "min-close", "", "Earliest close date: YYYY-MM-DD, 'today', or 'tomorrow'")
+	listCmd.Flags().StringVar(&listMaxClose, "max-close", "", "Latest close date: YYYY-MM-DD, 'today', or 'tomorrow'")
+	listCmd.Flags().StringVar(&listMveFilter, "mve-filter", "", "Multivariate event filter: exclude or only")
+	listCmd.Flags().StringVar(&listSearch, "search", "", "Substring search on ticker/subtitle (current page only; combine with --all to scan all pages)")
 
 	getCmd := &cobra.Command{
 		Use:   "get <ticker>",
@@ -124,9 +232,13 @@ func newMarketsCmd() *cobra.Command {
 }
 
 func marketsTable(markets []kalshi.Market, wide bool) ([]string, [][]string) {
-	headers := []string{"TICKER", "STATUS", "YES_BID", "YES_ASK", "SPREAD", "CLOSE"}
+	// Default: the 7 fields most useful for scanning LP opportunities at a glance.
+	// YES_BID and YES_ASK show price¢×size so you can assess depth in one column.
+	// VOL_24H is the primary liquidity signal.
+	headers := []string{"TICKER", "STATUS", "YES_BID", "YES_ASK", "SPREAD", "VOL_24H", "CLOSE"}
 	if wide {
-		headers = append(headers, "VOL_24H", "OPEN_INT", "LAST", "EVENT")
+		// Wide adds per-side depth sizes, total open interest, liquidity $, last trade, and event grouping.
+		headers = append(headers, "BID_SZ", "ASK_SZ", "OPEN_INT", "LIQUIDITY", "LAST", "EVENT")
 	}
 	rows := make([][]string, 0, len(markets))
 	for _, m := range markets {
@@ -136,12 +248,15 @@ func marketsTable(markets []kalshi.Market, wide bool) ([]string, [][]string) {
 			fmtCents(string(m.YesBidDollars)),
 			fmtCents(string(m.YesAskDollars)),
 			fmtSpread(string(m.YesBidDollars), string(m.YesAskDollars)),
+			m.Volume24hFp,
 			fmtTimeVal(m.CloseTime),
 		}
 		if wide {
 			row = append(row,
-				m.Volume24hFp,
+				m.YesBidSizeFp,
+				m.YesAskSizeFp,
 				m.OpenInterestFp,
+				fmtCents(string(m.LiquidityDollars)),
 				fmtCents(string(m.LastPriceDollars)),
 				m.EventTicker,
 			)
