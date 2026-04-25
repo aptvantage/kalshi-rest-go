@@ -240,9 +240,9 @@ hints = []string{"type to filter", "enter  apply", "esc  clear"}
 } else {
 switch m.screen {
 case ScreenCategories:
-hints = []string{"↑↓  navigate", "⏎  open category", "/  search tags"}
+hints = []string{"↑↓  navigate", "⏎  open category", "/  filter by category or tag  (| for OR)"}
 case ScreenSeriesList:
-hints = []string{"↑↓  navigate", "⏎  open series", "esc  back", "/  filter (ticker/title/tags)"}
+hints = []string{"↑↓  navigate", "⏎  open series", "esc  back", "/  filter  (| for OR)"}
 case ScreenEventsList:
 hints = []string{"↑↓  navigate", "⏎  open event", "esc  back", "/  filter"}
 case ScreenMarketsList:

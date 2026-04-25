@@ -255,9 +255,39 @@ return keys
 
 // --- filter / table builders ---
 
+// parseTerms splits a filter query on "|" into OR terms.
+// Each term is trimmed and lowercased. Single-term queries return [query].
+// e.g. "hockey | basketball" → ["hockey", "basketball"]
+func parseTerms(q string) []string {
+parts := strings.Split(q, "|")
+terms := make([]string, 0, len(parts))
+for _, p := range parts {
+p = strings.TrimSpace(p)
+if p != "" {
+terms = append(terms, p)
+}
+}
+return terms
+}
+
+// matchesAny returns true if any OR term is a substring of any of the fields.
+func matchesAny(terms []string, fields ...string) bool {
+for _, t := range terms {
+for _, f := range fields {
+if strings.Contains(strings.ToLower(f), t) {
+return true
+}
+}
+}
+return false
+}
+
 // applyFilter rebuilds the current screen's table rows filtered by filterQuery.
+// The query supports "|" for OR: "hockey | basketball" matches either term.
 func (m *Model) applyFilter() {
-q := strings.ToLower(m.filterQuery)
+q := strings.ToLower(strings.TrimSpace(m.filterQuery))
+terms := parseTerms(q)
+
 switch m.screen {
 case ScreenCategories:
 filtered := make([]categoryRow, 0, len(m.categoryRows))
@@ -266,9 +296,8 @@ label := r.name
 if label == "" {
 label = "all"
 }
-if q == "" ||
-strings.Contains(strings.ToLower(label), q) ||
-containsTag(r.tags, q) {
+fields := append([]string{label}, r.tags...)
+if q == "" || matchesAny(terms, fields...) {
 filtered = append(filtered, r)
 }
 }
@@ -281,11 +310,8 @@ for _, s := range m.seriesData {
 if m.categoryFilter != "" && s.Category != m.categoryFilter {
 continue
 }
-if q == "" ||
-strings.Contains(strings.ToLower(s.Ticker), q) ||
-strings.Contains(strings.ToLower(s.Title), q) ||
-strings.Contains(strings.ToLower(s.Category), q) ||
-containsTag(s.Tags, q) {
+fields := append([]string{s.Ticker, s.Title, s.Category}, s.Tags...)
+if q == "" || matchesAny(terms, fields...) {
 filtered = append(filtered, s)
 }
 }
@@ -294,9 +320,7 @@ m.initSeriesTable(filtered)
 case ScreenEventsList:
 filtered := make([]kalshi.EventData, 0, len(m.eventsData))
 for _, e := range m.eventsData {
-if q == "" ||
-strings.Contains(strings.ToLower(e.EventTicker), q) ||
-strings.Contains(strings.ToLower(e.SubTitle), q) {
+if q == "" || matchesAny(terms, e.EventTicker, e.SubTitle) {
 filtered = append(filtered, e)
 }
 }
@@ -305,24 +329,12 @@ m.initEventsTable(filtered)
 case ScreenMarketsList:
 filtered := make([]kalshi.Market, 0, len(m.marketsData))
 for _, mkt := range m.marketsData {
-if q == "" ||
-strings.Contains(strings.ToLower(mkt.Ticker), q) ||
-strings.Contains(strings.ToLower(string(mkt.Status)), q) {
+if q == "" || matchesAny(terms, mkt.Ticker, string(mkt.Status)) {
 filtered = append(filtered, mkt)
 }
 }
 m.initMarketsTable(filtered)
 }
-}
-
-// containsTag returns true if any tag in tags contains the query string.
-func containsTag(tags []string, q string) bool {
-for _, t := range tags {
-if strings.Contains(strings.ToLower(t), q) {
-return true
-}
-}
-return false
 }
 
 // --- table initializers ---

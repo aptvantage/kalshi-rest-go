@@ -210,8 +210,9 @@ m.categoryFilter = catName
 m.nav = append(m.nav, navEntry{label: catName, screen: ScreenSeriesList})
 }
 m.screen = ScreenSeriesList
-m.filterQuery = ""
-m.filterInput.SetValue("")
+// Carry the filter query into the series screen so tag-based searches
+// continue to work after selecting a category (don't clear it).
+m.filterInput.SetValue(m.filterQuery)
 m.applyFilter()
 }
 }
