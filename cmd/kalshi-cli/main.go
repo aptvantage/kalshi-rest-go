@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -52,6 +53,9 @@ func main() {
 			// the standard log package to the file so any log.Printf calls in
 			// TUI code appear there without corrupting the terminal.
 			if flagDebug != "" {
+				if err := os.MkdirAll(filepath.Dir(flagDebug), 0o755); err != nil {
+					return fmt.Errorf("create debug log directory: %w", err)
+				}
 				f, err := tea.LogToFile(flagDebug, "")
 				if err != nil {
 					return fmt.Errorf("open debug log %q: %w", flagDebug, err)
