@@ -172,7 +172,7 @@ go build ./...
 
 1. Create or edit the relevant `cmd/kalshi-cli/<group>.go` file
 2. Define a `new<Group><Action>Cmd()` function returning `*cobra.Command`
-3. Call `newAuthClient()` for authenticated endpoints or `newUnauthClient()` for public endpoints
+3. Call `newClient()` to get an authenticated API client (all endpoints require auth)
 4. Register it in the parent command's `AddCommand(...)` call
 5. Use `render(resp.JSON200, tableFunc)` for output — it dispatches to table/wide/json/yaml based on `-o`
 
@@ -182,6 +182,18 @@ Output helpers in `output.go`:
 - `fmtCents(fixedPoint)` — converts `"0.4500"` → `"45¢"`
 - `fmtTimeVal(t)` / `fmtTime(*t)` — formats timestamps as `MM/DD HH:MMZ`
 - `truncate(s, max)` — truncates strings for table columns
+
+## TUI Debug Logging
+
+When developing or debugging the interactive TUI, pass `--debug <path>` to redirect all `log.Printf` output to a file instead of stderr (which would corrupt the terminal display):
+
+```bash
+kalshi-cli --debug /tmp/kalshi-tui.log
+# In another terminal:
+tail -f /tmp/kalshi-tui.log
+```
+
+When `--debug` is not set, all log output is discarded to keep the alt-screen clean.
 
 ## Known Issues / Gotchas
 

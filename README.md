@@ -122,6 +122,98 @@ kalshi-cli orders create \
 kalshi-cli orders cancel <order-id>
 ```
 
+## Interactive TUI
+
+Running `kalshi-cli` with no subcommand launches a full-screen interactive terminal UI for browsing markets, scanning order books, and placing orders.
+
+```bash
+kalshi-cli              # launch TUI (production)
+kalshi-cli --env demo   # launch against the demo/sandbox environment
+```
+
+> **Debug mode:** add `--debug /tmp/kalshi.log` to write verbose API and navigation logs to a file without corrupting the terminal.
+
+### Navigation hierarchy
+
+```
+Categories  →  Series (filtered)  →  Events  →  Markets  →  Orderbook
+```
+
+Each screen narrows the data; `esc` / `backspace` steps back. The current path is shown in the breadcrumb at the top of the screen.
+
+### Key bindings
+
+| Key | Action |
+|---|---|
+| `↑` / `k` | Move up |
+| `↓` / `j` | Move down |
+| `⏎ Enter` | Go deeper (open selected row) |
+| `esc` / `⌫` | Go back one level |
+| `/` | Open filter bar |
+| `o` | New order (Markets screen only) |
+| `q` / `ctrl+c` | Quit |
+
+**In the filter bar:**
+
+| Key | Action |
+|---|---|
+| _type_ | Narrow results live |
+| `⏎ Enter` | Apply filter and navigate (on Categories) / close bar |
+| `esc` | Clear filter and close bar |
+
+**In the order entry form:**
+
+| Key | Action |
+|---|---|
+| `tab` / `↓` | Next field |
+| `shift+tab` / `↑` | Previous field |
+| `space` | Toggle side / action / post-only |
+| `ctrl+s` / `⏎` on Submit | Submit order |
+| `esc` | Cancel / go back |
+
+### Filter syntax
+
+The filter bar (press `/`) is available on every screen. Filters apply live as you type.
+
+| Syntax | Meaning |
+|---|---|
+| `hockey` | Substring match across all fields |
+| `hockey*` | Prefix match |
+| `*` | Match everything (same as no filter) |
+| `a \| b` | OR — match either term |
+| `category:sports` | Match only the category name field |
+| `tag:nhl` | Match only tag fields |
+| `category:sp*` | Field qualifier + wildcard combined |
+
+**Example:** `/tag:temperature | tag:weather` shows all categories/series tagged with temperature or weather topics.
+
+### Typical workflow
+
+```
+1. Launch: kalshi-cli
+2. (Optional) Press / and type a tag or category filter
+   e.g.  "hockey | basketball"  or  "category:sports"
+3. Press Enter → lands on Series screen filtered to matching series
+4. Navigate with ↑↓, Enter to open a series → Events screen
+5. Enter on an event → Markets screen (shows bid/ask/spread/volume)
+6. Enter on a market → Orderbook (scrollable with ↑↓)
+7. Press esc to back out, or o on a market row to open order entry
+```
+
+### Order entry
+
+Press `o` on any row in the Markets screen to open the order form. Fields:
+
+| Field | Description |
+|---|---|
+| side | `yes` or `no` |
+| action | `buy` or `sell` |
+| count | Number of contracts |
+| price | Limit price in cents (1–99) |
+| post-only | Only rest; reject if it would immediately fill |
+
+The header always shows your current balance, which refreshes after each order.
+
 ## SDK Usage
 
 ```go
