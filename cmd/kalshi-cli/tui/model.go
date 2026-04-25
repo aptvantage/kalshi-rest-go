@@ -35,8 +35,9 @@ type navEntry struct {
 // Model is the root Bubble Tea model. All mutable state lives here.
 type Model struct {
 	// Infrastructure
-	client *kalshi.ClientWithResponses
-	env    string
+	client        *kalshi.ClientWithResponses
+	env           string
+	authenticated bool // false = no credentials; balance and order features disabled
 
 	// Navigation breadcrumb stack (bottom = root, top = current).
 	nav    []navEntry
@@ -77,28 +78,32 @@ type Model struct {
 }
 
 // New creates the initial model. The program calls Init() to fire startup commands.
-func New(client *kalshi.ClientWithResponses, env string) Model {
+// Pass authenticated=false when no API credentials are available; market browsing
+// (series/events/markets/orderbook) still works via public endpoints, but balance
+// display and order entry are disabled.
+func New(client *kalshi.ClientWithResponses, env string, authenticated bool) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = loadStyle
 
 	return Model{
-		client:  client,
-		env:     env,
-		nav:     []navEntry{{label: "series", screen: ScreenSeriesList}},
-		screen:  ScreenSeriesList,
-		spinner: sp,
-		loading: true,
+		client:        client,
+		env:           env,
+		authenticated: authenticated,
+		nav:           []navEntry{{label: "series", screen: ScreenSeriesList}},
+		screen:        ScreenSeriesList,
+		spinner:       sp,
+		loading:       true,
 	}
 }
 
 // Init fires the initial data-loading commands.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		loadSeries(m.client),
-		loadBalance(m.client),
-		m.spinner.Tick,
-	)
+	cmds := tea.Batch(loadSeries(m.client), m.spinner.Tick)
+	if m.authenticated {
+		return tea.Batch(cmds, loadBalance(m.client))
+	}
+	return cmds
 }
 
 // --- helpers ---

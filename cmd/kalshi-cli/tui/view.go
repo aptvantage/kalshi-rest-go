@@ -63,7 +63,9 @@ func (m Model) viewHeaderRight() string {
 	}
 
 	bal := "  –"
-	if m.balance != nil {
+	if !m.authenticated {
+		bal = "  " + errStyle.Render("no auth")
+	} else if m.balance != nil {
 		bal = "  " + balanceStyle.Render(fmtDollarsFromCents(*m.balance))
 	}
 	return envBadge + bal

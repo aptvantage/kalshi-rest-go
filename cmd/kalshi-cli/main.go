@@ -42,16 +42,29 @@ func main() {
 		Long:  "Interact with Kalshi's Trade REST API from the command line.\n\nSet KALSHI_KEY_ID and KALSHI_KEY_FILE before use.",
 		// Running with no subcommand launches the interactive TUI.
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := newClient()
-			if err != nil {
-				return fmt.Errorf("TUI requires auth credentials: %w", err)
+			// Don't show usage text when RunE returns an error — usage is
+			// only helpful for flag/argument mistakes, not runtime failures.
+			cmd.SilenceUsage = true
+
+			// Try authenticated client first; fall back to public-only access.
+			// Series, events, markets, and orderbook are all public endpoints.
+			// Balance and order entry require credentials.
+			client, authErr := newClient()
+			authenticated := authErr == nil
+			if !authenticated {
+				var err error
+				client, err = newUnauthClient()
+				if err != nil {
+					return fmt.Errorf("failed to create API client: %w", err)
+				}
 			}
+
 			p := tea.NewProgram(
-				tui.New(client, flagEnv),
+				tui.New(client, flagEnv, authenticated),
 				tea.WithAltScreen(),
 				tea.WithMouseCellMotion(),
 			)
-			_, err = p.Run()
+			_, err := p.Run()
 			return err
 		},
 	}
