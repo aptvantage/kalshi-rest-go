@@ -32,7 +32,8 @@ const (
 )
 
 var (
-	flagEnv string
+	flagEnv   string
+	flagDebug string // path to debug log file; empty = no logging
 )
 
 func main() {
@@ -45,6 +46,18 @@ func main() {
 			// Don't show usage text when RunE returns an error — usage is
 			// only helpful for flag/argument mistakes, not runtime failures.
 			cmd.SilenceUsage = true
+
+			// Wire up debug log file when --debug is set.
+			// tea.LogToFile must be called before tea.NewProgram; it redirects
+			// the standard log package to the file so any log.Printf calls in
+			// TUI code appear there without corrupting the terminal.
+			if flagDebug != "" {
+				f, err := tea.LogToFile(flagDebug, "")
+				if err != nil {
+					return fmt.Errorf("open debug log %q: %w", flagDebug, err)
+				}
+				defer f.Close()
+			}
 
 			// Try authenticated client first; fall back to public-only access.
 			// Series, events, markets, and orderbook are all public endpoints.
@@ -71,6 +84,7 @@ func main() {
 
 	root.PersistentFlags().StringVar(&flagEnv, "env", "prod", "API environment: prod or demo")
 	root.PersistentFlags().StringVarP(&flagOutput, "output", "o", "table", "Output format: table, wide, json, yaml")
+	root.Flags().StringVar(&flagDebug, "debug", "", "Write TUI debug log to this file (e.g. --debug /tmp/kalshi-debug.log)")
 
 	root.AddCommand(
 		newExchangeCmd(),

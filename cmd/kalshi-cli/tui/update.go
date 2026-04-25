@@ -1,17 +1,18 @@
 package tui
 
 import (
-"fmt"
-"strconv"
-"strings"
+	"fmt"
+	"log"
+	"strconv"
+	"strings"
 
-"github.com/charmbracelet/bubbles/key"
-"github.com/charmbracelet/bubbles/spinner"
-"github.com/charmbracelet/bubbles/viewport"
-tea "github.com/charmbracelet/bubbletea"
-"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
-"github.com/aptvantage/kalshi-rest-go/kalshi"
+	"github.com/aptvantage/kalshi-rest-go/kalshi"
 )
 
 // Update processes every message dispatched by the Bubble Tea runtime.
@@ -51,54 +52,62 @@ cmds = append(cmds, loadOrderbook(m.client, m.selectedMarketTicker))
 }
 cmds = append(cmds, tick())
 
-case SeriesLoadedMsg:
-m.loading = false
-m.err = nil
-m.seriesData = msg.Series
-m.buildCategoryRows()
-m.applyFilter()
+	case SeriesLoadedMsg:
+		m.loading = false
+		m.err = nil
+		m.seriesData = msg.Series
+		log.Printf("[tui] series loaded: %d series", len(msg.Series))
+		m.buildCategoryRows()
+		m.applyFilter()
 
-case EventsLoadedMsg:
-m.loading = false
-m.err = nil
-m.eventsData = msg.Events
-m.applyFilter()
+	case EventsLoadedMsg:
+		m.loading = false
+		m.err = nil
+		m.eventsData = msg.Events
+		log.Printf("[tui] events loaded: %d events for series %s", len(msg.Events), m.selectedSeriesTicker)
+		m.applyFilter()
 
-case MarketsLoadedMsg:
-m.loading = false
-m.err = nil
-m.marketsData = msg.Markets
-m.applyFilter()
+	case MarketsLoadedMsg:
+		m.loading = false
+		m.err = nil
+		m.marketsData = msg.Markets
+		log.Printf("[tui] markets loaded: %d markets for event %s", len(msg.Markets), m.selectedEventTicker)
+		m.applyFilter()
 
-case BalanceLoadedMsg:
-bal := msg.Balance
-m.balance = &bal
+	case BalanceLoadedMsg:
+		bal := msg.Balance
+		m.balance = &bal
+		log.Printf("[tui] balance loaded: %d cents", bal)
 
-case OrderbookLoadedMsg:
-m.loading = false
-m.err = nil
-content := renderOrderbook(msg.Orderbook, msg.Ticker)
-m.obContent = content
-vp := viewport.New(m.contentWidth()-4, m.contentHeight()-2)
-vp.SetContent(content)
-m.orderbookVP = vp
+	case OrderbookLoadedMsg:
+		m.loading = false
+		m.err = nil
+		log.Printf("[tui] orderbook loaded: %s yes=%d no=%d levels",
+			msg.Ticker, len(msg.Orderbook.YesDollars), len(msg.Orderbook.NoDollars))
+		content := renderOrderbook(msg.Orderbook, msg.Ticker)
+		m.obContent = content
+		vp := viewport.New(m.contentWidth()-4, m.contentHeight()-2)
+		vp.SetContent(content)
+		m.orderbookVP = vp
 
-case OrderCreatedMsg:
-m.orderForm.submitting = false
-m.orderForm.result = fmt.Sprintf("✓ Order placed: %s", shortID(msg.Order.OrderId))
-m.orderForm.err = nil
-if m.authenticated {
-cmds = append(cmds, loadBalance(m.client))
-}
+	case OrderCreatedMsg:
+		m.orderForm.submitting = false
+		m.orderForm.result = fmt.Sprintf("✓ Order placed: %s", shortID(msg.Order.OrderId))
+		m.orderForm.err = nil
+		log.Printf("[tui] order created: %s", msg.Order.OrderId)
+		if m.authenticated {
+			cmds = append(cmds, loadBalance(m.client))
+		}
 
-case ErrMsg:
-m.loading = false
-if m.screen == ScreenOrderEntry {
-m.orderForm.submitting = false
-m.orderForm.err = msg.Err
-} else {
-m.err = msg.Err
-}
+	case ErrMsg:
+		m.loading = false
+		log.Printf("[tui] error (screen=%d): %v", m.screen, msg.Err)
+		if m.screen == ScreenOrderEntry {
+			m.orderForm.submitting = false
+			m.orderForm.err = msg.Err
+		} else {
+			m.err = msg.Err
+		}
 
 case tea.KeyMsg:
 if m.filterMode {
