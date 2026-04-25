@@ -16,6 +16,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -61,6 +63,10 @@ func main() {
 					return fmt.Errorf("open debug log %q: %w", flagDebug, err)
 				}
 				defer f.Close()
+			} else {
+				// Discard log output when not in debug mode — any log.Printf to
+				// stderr corrupts the alt-screen terminal rendering.
+				log.SetOutput(io.Discard)
 			}
 
 			// Build authenticated client. If credentials are missing or unreadable,

@@ -192,6 +192,20 @@ return 40
 return m.width
 }
 
+// tableHeight returns the number of data rows the table should display.
+// It shrinks by 1 when the filter bar is visible so the total render stays
+// within the terminal height (header border adds an extra line).
+func (m Model) tableHeight() int {
+h := m.contentHeight() - 2
+if m.filterMode || m.filterQuery != "" {
+h--
+}
+if h < 1 {
+return 1
+}
+return h
+}
+
 // --- category derivation ---
 
 // buildCategoryRows rebuilds categoryRows from the current seriesData.
@@ -431,7 +445,7 @@ t := table.New(
 table.WithColumns(cols),
 table.WithRows(trows),
 table.WithFocused(true),
-table.WithHeight(m.contentHeight()-2),
+table.WithHeight(m.tableHeight()),
 )
 t.SetStyles(tableStyles())
 m.categoriesTable = t
@@ -489,7 +503,7 @@ t := table.New(
 table.WithColumns(cols),
 table.WithRows(rows),
 table.WithFocused(true),
-table.WithHeight(m.contentHeight()-2),
+table.WithHeight(m.tableHeight()),
 )
 t.SetStyles(tableStyles())
 m.seriesTable = t
@@ -524,7 +538,7 @@ t := table.New(
 table.WithColumns(cols),
 table.WithRows(rows),
 table.WithFocused(true),
-table.WithHeight(m.contentHeight()-2),
+table.WithHeight(m.tableHeight()),
 )
 t.SetStyles(tableStyles())
 m.eventsTable = t
@@ -554,7 +568,7 @@ t := table.New(
 table.WithColumns(cols),
 table.WithRows(rows),
 table.WithFocused(true),
-table.WithHeight(m.contentHeight()-2),
+table.WithHeight(m.tableHeight()),
 )
 t.SetStyles(tableStyles())
 m.marketsTable = t

@@ -150,6 +150,18 @@ case "enter":
 m.filterMode = false
 m.filterQuery = m.filterInput.Value()
 m.applyFilter()
+// On categories, Enter navigates directly to series rather than
+// just closing the filter bar and making the user press Enter again.
+if m.screen == ScreenCategories {
+navLabel := "series"
+if m.filterQuery != "" && m.filterQuery != "*" {
+navLabel = "series: " + m.filterQuery
+}
+m.nav = append(m.nav, navEntry{label: navLabel, screen: ScreenSeriesList})
+m.screen = ScreenSeriesList
+m.filterInput.SetValue(m.filterQuery)
+m.applyFilter()
+}
 return m, nil
 default:
 var cmd tea.Cmd
