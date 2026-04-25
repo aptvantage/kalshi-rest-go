@@ -111,9 +111,6 @@ marketsData []kalshi.Market
 // Derived category rows (rebuilt after seriesData loads).
 categoryRows []categoryRow
 
-// Active category filter ("" = all series visible).
-categoryFilter string
-
 // Table models — one per hierarchy level.
 categoriesTable table.Model
 seriesTable     table.Model
@@ -221,19 +218,7 @@ cats = append(cats, c)
 }
 sort.Strings(cats)
 
-rows := make([]categoryRow, 0, len(cats)+1)
-// "All" meta-row.
-allTags := make(map[string]struct{})
-for _, tagSet := range catMap {
-for t := range tagSet {
-allTags[t] = struct{}{}
-}
-}
-rows = append(rows, categoryRow{
-name:        "",
-seriesCount: len(m.seriesData),
-tags:        sortedKeys(allTags),
-})
+rows := make([]categoryRow, 0, len(cats))
 for _, c := range cats {
 rows = append(rows, categoryRow{
 name:        c,
@@ -270,12 +255,52 @@ terms = append(terms, p)
 return terms
 }
 
-// matchesAny returns true if any OR term is a substring of any of the fields.
-func matchesAny(terms []string, fields ...string) bool {
-for _, t := range terms {
-for _, f := range fields {
-if strings.Contains(strings.ToLower(f), t) {
+// matchGlob matches pattern against value (both lowercased by caller).
+// "*" matches everything; "foo*" matches values starting with "foo";
+// otherwise a substring match is used.
+func matchGlob(pattern, value string) bool {
+if pattern == "*" || pattern == "" {
 return true
+}
+if strings.HasSuffix(pattern, "*") {
+return strings.HasPrefix(value, strings.TrimSuffix(pattern, "*"))
+}
+return strings.Contains(value, pattern)
+}
+
+// matchTerms returns true if any OR term matches the field map.
+// Field map keys: "category", "tag", "ticker", "title", etc.
+// Term syntax:
+//   - "*"             → matches everything
+//   - "hockey"        → substring match across all fields
+//   - "hockey*"       → prefix match across all fields
+//   - "category:ba*"  → match only the "category" field with pattern "ba*"
+//   - "tag:nhl"       → match only tag fields containing "nhl"
+func matchTerms(terms []string, fields map[string][]string) bool {
+if len(terms) == 0 {
+return true
+}
+for _, term := range terms {
+term = strings.ToLower(strings.TrimSpace(term))
+if term == "" || term == "*" {
+return true
+}
+qualifier, pattern, hasQualifier := strings.Cut(term, ":")
+if hasQualifier {
+if vals, ok := fields[qualifier]; ok {
+for _, v := range vals {
+if matchGlob(pattern, strings.ToLower(v)) {
+return true
+}
+}
+}
+} else {
+for _, vals := range fields {
+for _, v := range vals {
+if matchGlob(term, strings.ToLower(v)) {
+return true
+}
+}
 }
 }
 }
@@ -283,35 +308,67 @@ return false
 }
 
 // applyFilter rebuilds the current screen's table rows filtered by filterQuery.
-// The query supports "|" for OR: "hockey | basketball" matches either term.
+//
+// Filter syntax:
+//   - "|"          OR: "hockey | basketball" matches either
+//   - "*"          wildcard: "hockey*" prefix match; bare "*" matches all
+//   - "category:X" restrict match to category name field only
+//   - "tag:X"      restrict match to tag fields only
 func (m *Model) applyFilter() {
-q := strings.ToLower(strings.TrimSpace(m.filterQuery))
-terms := parseTerms(q)
+q := strings.TrimSpace(m.filterQuery)
+terms := parseTerms(strings.ToLower(q))
+
+// General terms (no field qualifier) are used to narrow the tags shown.
+generalTerms := make([]string, 0, len(terms))
+for _, t := range terms {
+if !strings.Contains(t, ":") {
+generalTerms = append(generalTerms, t)
+}
+}
 
 switch m.screen {
 case ScreenCategories:
 filtered := make([]categoryRow, 0, len(m.categoryRows))
 for _, r := range m.categoryRows {
-label := r.name
-if label == "" {
-label = "all"
+catFields := map[string][]string{
+"category": {r.name},
+"tag":      r.tags,
 }
-fields := append([]string{label}, r.tags...)
-if q == "" || matchesAny(terms, fields...) {
-filtered = append(filtered, r)
+if q != "" && q != "*" && !matchTerms(terms, catFields) {
+continue
 }
+// Narrow displayed tags to those matching unqualified terms.
+shownTags := r.tags
+if len(generalTerms) > 0 {
+shownTags = make([]string, 0, len(r.tags))
+for _, tag := range r.tags {
+if matchTerms(generalTerms, map[string][]string{"tag": {tag}}) {
+shownTags = append(shownTags, tag)
+}
+}
+}
+filtered = append(filtered, categoryRow{
+name:        r.name,
+seriesCount: r.seriesCount,
+tags:        shownTags,
+})
 }
 m.initCategoriesTable(filtered)
 
 case ScreenSeriesList:
 filtered := make([]kalshi.Series, 0, len(m.seriesData))
 for _, s := range m.seriesData {
-// Category gate: only show series matching the active category filter.
-if m.categoryFilter != "" && s.Category != m.categoryFilter {
+if q == "" || q == "*" {
+filtered = append(filtered, s)
 continue
 }
-fields := append([]string{s.Ticker, s.Title, s.Category}, s.Tags...)
-if q == "" || matchesAny(terms, fields...) {
+fields := map[string][]string{
+"category": {s.Category},
+"tag":      s.Tags,
+"ticker":   {s.Ticker},
+"title":    {s.Title},
+}
+if matchTerms(terms, fields) {
 filtered = append(filtered, s)
 }
 }
@@ -320,7 +377,11 @@ m.initSeriesTable(filtered)
 case ScreenEventsList:
 filtered := make([]kalshi.EventData, 0, len(m.eventsData))
 for _, e := range m.eventsData {
-if q == "" || matchesAny(terms, e.EventTicker, e.SubTitle) {
+fields := map[string][]string{
+"ticker":   {e.EventTicker},
+"subtitle": {e.SubTitle},
+}
+if q == "" || matchTerms(terms, fields) {
 filtered = append(filtered, e)
 }
 }
@@ -329,7 +390,11 @@ m.initEventsTable(filtered)
 case ScreenMarketsList:
 filtered := make([]kalshi.Market, 0, len(m.marketsData))
 for _, mkt := range m.marketsData {
-if q == "" || matchesAny(terms, mkt.Ticker, string(mkt.Status)) {
+fields := map[string][]string{
+"ticker": {mkt.Ticker},
+"status": {string(mkt.Status)},
+}
+if q == "" || matchTerms(terms, fields) {
 filtered = append(filtered, mkt)
 }
 }

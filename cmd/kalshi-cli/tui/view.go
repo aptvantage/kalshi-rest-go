@@ -205,11 +205,7 @@ n := len(m.categoriesTable.Rows())
 parts = append(parts, fmt.Sprintf("%d categories", n))
 case ScreenSeriesList:
 n := len(m.seriesTable.Rows())
-label := "series"
-if m.categoryFilter != "" {
-label = fmt.Sprintf("series in %q", m.categoryFilter)
-}
-parts = append(parts, fmt.Sprintf("%d %s", n, label))
+parts = append(parts, fmt.Sprintf("%d series", n))
 case ScreenEventsList:
 n := len(m.eventsTable.Rows())
 parts = append(parts, fmt.Sprintf("%d events", n))
@@ -240,7 +236,7 @@ hints = []string{"type to filter", "enter  apply", "esc  clear"}
 } else {
 switch m.screen {
 case ScreenCategories:
-hints = []string{"↑↓  navigate", "⏎  open category", "/  filter by category or tag  (| for OR)"}
+hints = []string{"↑↓  browse", "⏎  go to series", "/  filter  (| OR  *  wildcard  category:X  tag:X)"}
 case ScreenSeriesList:
 hints = []string{"↑↓  navigate", "⏎  open series", "esc  back", "/  filter  (| for OR)"}
 case ScreenEventsList:

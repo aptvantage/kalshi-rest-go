@@ -198,23 +198,16 @@ m.categoriesTable.MoveUp(1)
 case key.Matches(msg, DefaultKeyMap.Down):
 m.categoriesTable.MoveDown(1)
 case key.Matches(msg, DefaultKeyMap.Enter):
-row := m.categoriesTable.SelectedRow()
-if len(row) > 0 {
-// row[0] is "(all)" or a real category name.
-catName := row[0]
-if catName == "(all)" {
-m.categoryFilter = ""
-m.nav = append(m.nav, navEntry{label: "all series", screen: ScreenSeriesList})
-} else {
-m.categoryFilter = catName
-m.nav = append(m.nav, navEntry{label: catName, screen: ScreenSeriesList})
+// Navigate to series filtered by the current query.
+// Category rows are for browsing only; the filter is what drives series results.
+navLabel := "series"
+if m.filterQuery != "" && m.filterQuery != "*" {
+navLabel = "series: " + m.filterQuery
 }
+m.nav = append(m.nav, navEntry{label: navLabel, screen: ScreenSeriesList})
 m.screen = ScreenSeriesList
-// Carry the filter query into the series screen so tag-based searches
-// continue to work after selecting a category (don't clear it).
 m.filterInput.SetValue(m.filterQuery)
 m.applyFilter()
-}
 }
 
 case ScreenSeriesList:
