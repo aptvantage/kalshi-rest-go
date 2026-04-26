@@ -290,9 +290,9 @@ switch {
 case key.Matches(msg, DefaultKeyMap.Quit):
 return m, tea.Quit
 case key.Matches(msg, DefaultKeyMap.Up):
-m.orderbookVP.LineUp(1)
+m.orderbookVP.ScrollUp(1)
 case key.Matches(msg, DefaultKeyMap.Down):
-m.orderbookVP.LineDown(1)
+m.orderbookVP.ScrollDown(1)
 case key.Matches(msg, DefaultKeyMap.Back):
 m.navigateBack()
 }

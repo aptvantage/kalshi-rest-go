@@ -135,6 +135,9 @@ func newClient() (*kalshi.ClientWithResponses, error) {
 
 
 func baseURL() string {
+	if override := os.Getenv("KALSHI_BASE_URL"); override != "" {
+		return override
+	}
 	if flagEnv == "demo" {
 		return demoBase
 	}
