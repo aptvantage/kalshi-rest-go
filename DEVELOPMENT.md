@@ -42,6 +42,8 @@ kalshi-rest-go/
 
 ## Building
 
+Go modules are downloaded automatically on first build — no separate `go mod download` step is required.
+
 ```bash
 # Build all packages (validates everything compiles)
 go build ./...
@@ -225,7 +227,6 @@ When `--debug` is not set, all log output is discarded to keep the alt-screen cl
 
 ## Known Issues / Gotchas
 
-- **GPG commit signing**: `git commit` in non-interactive shells (e.g., Copilot tools) times out on GPG pinentry. Workaround: `git -c commit.gpgsign=false commit`.
 - **Demo credentials**: The demo API (`demo-api.kalshi.co`) is live but requires a separate account and API key — production credentials return HTTP 401.
 - **Kalshi spec bug**: The upstream spec uses `x-go-type-skip-optional-pointer: true` on optional bool/string query params but the generated code still emits nil comparisons, causing compile errors. The `kalshi.yaml` in this repo already has these stripped — re-apply the `sed` command after any spec update.
 - **MVE markets dominate default list**: `markets list` without filters returns multivariate/combo markets by default. Use `--mve-filter exclude` or `--series-ticker` (e.g., `KXHIGHNY`) to get standard single-leg markets.
