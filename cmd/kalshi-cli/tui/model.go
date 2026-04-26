@@ -708,8 +708,8 @@ if l := len(strings.Join(s.Tags, ", ")); l > tagsW {
 tagsW = l
 }
 }
-if tagsW > 24 {
-tagsW = 24
+if tagsW > 40 {
+tagsW = 40
 }
 
 // TITLE fills remaining space.
