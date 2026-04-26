@@ -15,6 +15,8 @@ Tab      key.Binding
 ShiftTab key.Binding
 Space    key.Binding
 CtrlS    key.Binding
+SortNext key.Binding
+SortRev  key.Binding
 }
 
 // DefaultKeyMap is the application-wide keymap.
@@ -30,4 +32,6 @@ Tab:      key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field"))
 ShiftTab: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev field")),
 Space:    key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle")),
 CtrlS:    key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit")),
+SortNext: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sort col")),
+SortRev:  key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "reverse sort")),
 }

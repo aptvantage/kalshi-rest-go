@@ -11,7 +11,9 @@
 package tui
 
 import (
+"fmt"
 "sort"
+"strconv"
 "strings"
 
 "github.com/charmbracelet/bubbles/spinner"
@@ -144,6 +146,10 @@ err error
 selectedSeriesTicker string
 selectedEventTicker  string
 selectedMarketTicker string
+
+// Series sort state.
+seriesSortCol string // "vol", "title", "ticker", "freq" — default "vol"
+seriesSortAsc bool   // false = descending (default for vol); true = ascending
 }
 
 // New creates the initial model. Authentication is verified via verifyAuth during
@@ -169,6 +175,8 @@ spinner:     sp,
 filterInput:   fi,
 screenFilters: make(map[Screen]string),
 loading:       true,
+seriesSortCol: "vol",
+seriesSortAsc: false, // default: vol descending
 }
 }
 
@@ -394,6 +402,7 @@ continue
 }
 filtered = append(filtered, s)
 }
+m.sortSeries(filtered)
 m.initSeriesTable(filtered)
 
 case ScreenEventsList:
@@ -559,10 +568,119 @@ return result
 ""), "")
 }
 
+// sortSeries sorts series in-place according to the current sort state.
+// Ticker is used as a stable tiebreaker when primary values are equal.
+func (m *Model) sortSeries(s []kalshi.Series) {
+sort.SliceStable(s, func(i, j int) bool {
+var cmp int
+switch m.seriesSortCol {
+case "title":
+ti, tj := strings.ToLower(s[i].Title), strings.ToLower(s[j].Title)
+if ti < tj {
+cmp = -1
+} else if ti > tj {
+cmp = 1
+}
+case "ticker":
+if s[i].Ticker < s[j].Ticker {
+cmp = -1
+} else if s[i].Ticker > s[j].Ticker {
+cmp = 1
+}
+case "freq":
+fi, fj := strings.ToLower(s[i].Frequency), strings.ToLower(s[j].Frequency)
+if fi < fj {
+cmp = -1
+} else if fi > fj {
+cmp = 1
+}
+default: // "vol"
+vi, vj := parseVolume(s[i].VolumeFp), parseVolume(s[j].VolumeFp)
+if vi < vj {
+cmp = -1
+} else if vi > vj {
+cmp = 1
+}
+}
+// Stable tiebreaker: always sort by ticker ascending when primary key is equal.
+if cmp == 0 {
+if s[i].Ticker < s[j].Ticker {
+cmp = -1
+} else if s[i].Ticker > s[j].Ticker {
+cmp = 1
+}
+}
+if m.seriesSortAsc {
+return cmp < 0
+}
+return cmp > 0
+})
+}
+
+// seriesSortCols lists the sort column cycle order.
+var seriesSortCols = []string{"vol", "title", "ticker", "freq"}
+
+// nextSeriesSortCol advances the sort column, resetting direction to the natural default.
+func (m *Model) nextSeriesSortCol() {
+for i, c := range seriesSortCols {
+if c == m.seriesSortCol {
+m.seriesSortCol = seriesSortCols[(i+1)%len(seriesSortCols)]
+// vol defaults desc, others default asc
+m.seriesSortAsc = m.seriesSortCol != "vol"
+return
+}
+}
+m.seriesSortCol = "vol"
+m.seriesSortAsc = false
+}
+
+// parseVolume parses a FixedPointCount string ("12345.00") into a float64.
+func parseVolume(fp *kalshi.FixedPointCount) float64 {
+if fp == nil {
+return 0
+}
+v, _ := strconv.ParseFloat(*fp, 64)
+return v
+}
+
+// fmtVolume formats a volume as a compact human-readable string (1.2M, 34.5K, etc.).
+func fmtVolume(fp *kalshi.FixedPointCount) string {
+v := parseVolume(fp)
+switch {
+case v >= 1_000_000:
+return fmt.Sprintf("%.1fM", v/1_000_000)
+case v >= 1_000:
+return fmt.Sprintf("%.1fK", v/1_000)
+case v > 0:
+return fmt.Sprintf("%.0f", v)
+default:
+return "-"
+}
+}
+
+// fmtFee formats fee type and multiplier into a compact label.
+func fmtFee(ft kalshi.SeriesFeeType, mult float64) string {
+var abbr string
+switch ft {
+case "quadratic_with_maker_fees":
+abbr = "maker"
+case "quadratic":
+abbr = "quad"
+case "flat":
+abbr = "flat"
+default:
+abbr = string(ft)
+}
+if mult == 1.0 || mult == 0 {
+return abbr
+}
+return fmt.Sprintf("%s×%.2g", abbr, mult)
+}
+
 func (m *Model) initSeriesTable(series []kalshi.Series) {
 w := m.contentWidth()
 
-// Dynamic widths: each fixed column sized to its widest content.
+// Dynamic widths for fixed columns.
 tickerW, catW, freqW := 6, 8, 4
 for _, s := range series {
 if l := len(s.Ticker); l > tickerW {
@@ -579,6 +697,10 @@ tickerW = min(tickerW+2, 20)
 catW = min(catW+2, 26)
 freqW = min(freqW+2, 12)
 
+// VOL and FEE are compact fixed-width columns.
+const volW = 8
+const feeW = 10
+
 // TAGS: sized to widest joined tag string, capped so TITLE still gets space.
 tagsW := 6
 for _, s := range series {
@@ -586,22 +708,43 @@ if l := len(strings.Join(s.Tags, ", ")); l > tagsW {
 tagsW = l
 }
 }
-if tagsW > 28 {
-tagsW = 28
+if tagsW > 24 {
+tagsW = 24
 }
 
 // TITLE fills remaining space.
-const colSep = 5
-titleW := w - tickerW - catW - freqW - tagsW - colSep
+const colSep = 6
+titleW := w - tickerW - catW - freqW - volW - feeW - tagsW - colSep
 if titleW < 20 {
 titleW = 20
 }
 
+// Build sort indicator for VOL header.
+volHeader := "VOL"
+titleHeader := "TITLE"
+freqHeader := "FREQ"
+tickerHeader := "TICKER"
+arrow := func(col string) string {
+if m.seriesSortCol != col {
+return ""
+}
+if m.seriesSortAsc {
+return " ▲"
+}
+return " ▼"
+}
+volHeader += arrow("vol")
+titleHeader += arrow("title")
+freqHeader += arrow("freq")
+tickerHeader += arrow("ticker")
+
 cols := []table.Column{
-{Title: "TICKER", Width: tickerW},
-{Title: "TITLE", Width: titleW},
+{Title: tickerHeader, Width: tickerW},
+{Title: titleHeader, Width: titleW},
 {Title: "CATEGORY", Width: catW},
-{Title: "FREQ", Width: freqW},
+{Title: freqHeader, Width: freqW},
+{Title: volHeader, Width: volW},
+{Title: "FEE", Width: feeW},
 {Title: "TAGS", Width: tagsW},
 }
 
@@ -616,6 +759,8 @@ nLines = len(tagLines)
 if nLines == 0 {
 nLines = 1
 }
+vol := fmtVolume(s.VolumeFp)
+fee := fmtFee(s.FeeType, s.FeeMultiplier)
 for i := 0; i < nLines; i++ {
 var titleCell, tagCell string
 if i < len(titleLines) {
@@ -625,9 +770,9 @@ if i < len(tagLines) {
 tagCell = tagLines[i]
 }
 if i == 0 {
-rows = append(rows, table.Row{s.Ticker, titleCell, s.Category, s.Frequency, tagCell})
+rows = append(rows, table.Row{s.Ticker, titleCell, s.Category, s.Frequency, vol, fee, tagCell})
 } else {
-rows = append(rows, table.Row{"", titleCell, "", "", tagCell})
+rows = append(rows, table.Row{"", titleCell, "", "", "", "", tagCell})
 }
 }
 }

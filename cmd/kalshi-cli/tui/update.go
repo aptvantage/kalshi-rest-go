@@ -244,6 +244,12 @@ cmds = append(cmds, loadEvents(m.client, m.selectedSeriesTicker))
 }
 case key.Matches(msg, DefaultKeyMap.Back):
 m.navigateBack()
+case key.Matches(msg, DefaultKeyMap.SortNext):
+m.nextSeriesSortCol()
+m.applyFilter()
+case key.Matches(msg, DefaultKeyMap.SortRev):
+m.seriesSortAsc = !m.seriesSortAsc
+m.applyFilter()
 }
 
 case ScreenEventsList:
