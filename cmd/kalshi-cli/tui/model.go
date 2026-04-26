@@ -428,26 +428,51 @@ m.initMarketsTable(filtered)
 
 func (m *Model) initCategoriesTable(rows []categoryRow) {
 w := m.contentWidth()
-tagsW := w - 14 - 8 - 4
+
+// Size the category column to fit the longest name.
+catW := 8
+for _, r := range rows {
+n := len(r.name)
+if n == 0 {
+n = 5 // "(all)"
+}
+if n > catW {
+catW = n
+}
+}
+if catW > 32 {
+catW = 32
+}
+catW += 2 // breathing room
+
+seriesW := 8
+tagsW := w - catW - seriesW - 4
 if tagsW < 20 {
 tagsW = 20
 }
+
 cols := []table.Column{
-{Title: "CATEGORY", Width: 14},
-{Title: "SERIES", Width: 8},
+{Title: "CATEGORY", Width: catW},
+{Title: "SERIES", Width: seriesW},
 {Title: "TAGS", Width: tagsW},
 }
+
 trows := make([]table.Row, 0, len(rows))
 for _, r := range rows {
 name := r.name
 if name == "" {
 name = "(all)"
 }
-trows = append(trows, table.Row{
-name,
-strings.NewReplacer().Replace(formatInt(r.seriesCount)),
-truncate(strings.Join(r.tags, ", "), tagsW),
-})
+lines := wrapTags(r.tags, tagsW)
+if len(lines) == 0 {
+lines = []string{""}
+}
+// First visual row carries the category name and series count.
+trows = append(trows, table.Row{truncate(name, catW), formatInt(r.seriesCount), lines[0]})
+// Continuation rows leave the first two cells blank.
+for _, line := range lines[1:] {
+trows = append(trows, table.Row{"", "", line})
+}
 }
 t := table.New(
 table.WithColumns(cols),
@@ -457,6 +482,30 @@ table.WithHeight(m.tableHeight()),
 )
 t.SetStyles(tableStyles())
 m.categoriesTable = t
+}
+
+// wrapTags fits tags into lines of at most maxWidth characters, separated by ", ".
+func wrapTags(tags []string, maxWidth int) []string {
+if len(tags) == 0 {
+return nil
+}
+var lines []string
+current := ""
+for _, tag := range tags {
+switch {
+case current == "":
+current = tag
+case len(current)+2+len(tag) <= maxWidth:
+current += ", " + tag
+default:
+lines = append(lines, current)
+current = tag
+}
+}
+if current != "" {
+lines = append(lines, current)
+}
+return lines
 }
 
 func formatInt(n int) string {
