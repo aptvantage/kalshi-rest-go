@@ -95,7 +95,35 @@ Demo credentials are separate from production — you need a distinct API key cr
 
 ## Testing
 
-There are no automated unit tests yet. Until a mock server or recorded fixtures are added, testing is done manually against the demo environment.
+### Automated tests
+
+The test suite runs entirely offline — no Kalshi credentials or network access required. A `TestMain` in `cmd/kalshi-cli/` compiles the binary once, then each test runs it as a subprocess with credentials and the base URL injected via environment variables. A local `httptest.NewServer` serves fixture JSON responses for all API endpoints.
+
+```bash
+# Run all tests
+go test ./cmd/kalshi-cli/... ./cmd/kalshi-cli/tui/...
+
+# Run with verbose output
+go test -v ./cmd/kalshi-cli/... ./cmd/kalshi-cli/tui/...
+
+# Run a specific test
+go test -v -run TestOrdersCreate ./cmd/kalshi-cli/
+```
+
+Coverage:
+- **exchange_test.go** — `exchange status`, `exchange limits`, HTTP error cases
+- **portfolio_test.go** — `portfolio balance`, `positions`, `fills`
+- **series_test.go** — `series list`, `series get`, `series categories`
+- **events_test.go** — `events list`, `events get`, missing-arg and HTTP 404 cases
+- **markets_test.go** — `markets list`, `markets orderbook`, error cases
+- **orders_test.go** — `orders list`, `create`, `get`, `cancel`, input validation errors
+- **tui/filter_test.go** — `matchGlob`, `parseTerms`, `matchTerms` unit tests
+
+To inject a custom API base URL (e.g., a local mock or staging server), set `KALSHI_BASE_URL`:
+
+```bash
+KALSHI_BASE_URL=http://localhost:8080/trade-api/v2 kalshi-cli exchange status
+```
 
 ### Manual smoke test
 
