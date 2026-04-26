@@ -508,6 +508,34 @@ lines = append(lines, current)
 return lines
 }
 
+// wrapText wraps s into lines of at most maxWidth characters, breaking on word boundaries.
+func wrapText(s string, maxWidth int) []string {
+if maxWidth <= 0 {
+return []string{s}
+}
+words := strings.Fields(s)
+if len(words) == 0 {
+return nil
+}
+var lines []string
+current := ""
+for _, w := range words {
+switch {
+case current == "":
+current = w
+case len(current)+1+len(w) <= maxWidth:
+current += " " + w
+default:
+lines = append(lines, current)
+current = w
+}
+}
+if current != "" {
+lines = append(lines, current)
+}
+return lines
+}
+
 func formatInt(n int) string {
 return strings.TrimRight(strings.TrimRight(
 func() string {
@@ -533,29 +561,77 @@ return result
 
 func (m *Model) initSeriesTable(series []kalshi.Series) {
 w := m.contentWidth()
-tickerW := 14
-tagsW := 20
-titleW := w - tickerW - tagsW - 12 - 12 - 6
-if titleW < 16 {
-titleW = 16
+
+// Dynamic widths: each fixed column sized to its widest content.
+tickerW, catW, freqW := 6, 8, 4
+for _, s := range series {
+if l := len(s.Ticker); l > tickerW {
+tickerW = l
 }
+if l := len(s.Category); l > catW {
+catW = l
+}
+if l := len(s.Frequency); l > freqW {
+freqW = l
+}
+}
+tickerW = min(tickerW+2, 20)
+catW = min(catW+2, 26)
+freqW = min(freqW+2, 12)
+
+// TAGS: sized to widest joined tag string, capped so TITLE still gets space.
+tagsW := 6
+for _, s := range series {
+if l := len(strings.Join(s.Tags, ", ")); l > tagsW {
+tagsW = l
+}
+}
+if tagsW > 28 {
+tagsW = 28
+}
+
+// TITLE fills remaining space.
+const colSep = 5
+titleW := w - tickerW - catW - freqW - tagsW - colSep
+if titleW < 20 {
+titleW = 20
+}
+
 cols := []table.Column{
 {Title: "TICKER", Width: tickerW},
 {Title: "TITLE", Width: titleW},
-{Title: "CATEGORY", Width: 12},
-{Title: "FREQ", Width: 8},
+{Title: "CATEGORY", Width: catW},
+{Title: "FREQ", Width: freqW},
 {Title: "TAGS", Width: tagsW},
 }
+
 rows := make([]table.Row, 0, len(series))
 for _, s := range series {
-rows = append(rows, table.Row{
-s.Ticker,
-truncate(s.Title, titleW),
-s.Category,
-s.Frequency,
-truncate(strings.Join(s.Tags, ", "), tagsW),
-})
+titleLines := wrapText(s.Title, titleW)
+tagLines := wrapTags(s.Tags, tagsW)
+nLines := len(titleLines)
+if len(tagLines) > nLines {
+nLines = len(tagLines)
 }
+if nLines == 0 {
+nLines = 1
+}
+for i := 0; i < nLines; i++ {
+var titleCell, tagCell string
+if i < len(titleLines) {
+titleCell = titleLines[i]
+}
+if i < len(tagLines) {
+tagCell = tagLines[i]
+}
+if i == 0 {
+rows = append(rows, table.Row{s.Ticker, titleCell, s.Category, s.Frequency, tagCell})
+} else {
+rows = append(rows, table.Row{"", titleCell, "", "", tagCell})
+}
+}
+}
+
 t := table.New(
 table.WithColumns(cols),
 table.WithRows(rows),

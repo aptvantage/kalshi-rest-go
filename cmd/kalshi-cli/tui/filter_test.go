@@ -247,3 +247,79 @@ func TestMatchTerms(t *testing.T) {
 		}
 	}
 }
+
+func TestWrapText(t *testing.T) {
+cases := []struct {
+input    string
+maxWidth int
+want     []string
+}{
+{"hello world", 20, []string{"hello world"}},
+{"hello world", 5, []string{"hello", "world"}},
+{"a b c", 3, []string{"a b", "c"}},
+{"short", 100, []string{"short"}},
+{"", 20, nil},
+{"one", 3, []string{"one"}},
+// Long title wraps at word boundaries
+{"Will the Federal Reserve cut rates in 2025", 20, []string{"Will the Federal", "Reserve cut rates in", "2025"}},
+}
+for _, tc := range cases {
+got := wrapText(tc.input, tc.maxWidth)
+if len(got) != len(tc.want) {
+t.Errorf("wrapText(%q, %d) = %v, want %v", tc.input, tc.maxWidth, got, tc.want)
+continue
+}
+for i := range got {
+if got[i] != tc.want[i] {
+t.Errorf("wrapText(%q, %d)[%d] = %q, want %q", tc.input, tc.maxWidth, i, got[i], tc.want[i])
+}
+}
+}
+}
+
+func TestSeriesTableWrapsLongTitles(t *testing.T) {
+m := minModel()
+m.width = 80
+m.height = 40
+series := []kalshi.Series{
+{
+Ticker:    "KXTEST",
+Title:     "Will the Federal Reserve cut interest rates before the end of 2025 fiscal year",
+Category:  "Finance",
+Frequency: "daily",
+Tags:      []string{"rates", "fed"},
+},
+}
+m.initSeriesTable(series)
+rows := m.seriesTable.Rows()
+if len(rows) < 2 {
+t.Fatalf("expected multiple rows for long title, got %d", len(rows))
+}
+// First row has ticker; continuation rows have empty ticker
+if rows[0][0] != "KXTEST" {
+t.Errorf("first row ticker = %q, want KXTEST", rows[0][0])
+}
+if rows[1][0] != "" {
+t.Errorf("continuation row ticker = %q, want empty", rows[1][0])
+}
+}
+
+func TestSeriesTableDynamicColumnWidths(t *testing.T) {
+m := minModel()
+m.width = 200
+m.height = 40
+series := []kalshi.Series{
+{Ticker: "SHORT", Title: "T", Category: "Science & Technology", Frequency: "daily", Tags: []string{"a"}},
+{Ticker: "LONGERTICKER", Title: "T", Category: "Politics", Frequency: "weekly", Tags: []string{"b"}},
+}
+m.initSeriesTable(series)
+cols := m.seriesTable.Columns()
+// TICKER col should accommodate "LONGERTICKER" (12 chars) + padding
+if cols[0].Width < 14 {
+t.Errorf("ticker col width %d < 14, expected to fit LONGERTICKER", cols[0].Width)
+}
+// CATEGORY col should accommodate "Science & Technology" (20 chars) + padding
+if cols[2].Width < 22 {
+t.Errorf("category col width %d < 22, expected to fit Science & Technology", cols[2].Width)
+}
+}
