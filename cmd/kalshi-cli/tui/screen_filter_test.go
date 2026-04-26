@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/aptvantage/kalshi-rest-go/kalshi"
@@ -14,6 +15,8 @@ func minModel() Model {
 		screenFilters: make(map[Screen]string),
 		width:         200,
 		height:        40,
+		seriesSortCol: "vol",
+		seriesSortAsc: false,
 	}
 }
 
@@ -147,17 +150,26 @@ func TestApplyFilterSeriesAndLogic(t *testing.T) {
 			m.applyFilter()
 
 			rows := m.seriesTable.Rows()
-			if len(rows) != len(tc.wantTickers) {
-				got := make([]string, len(rows))
-				for i, r := range rows {
-					got[i] = r[0]
+			// Collect non-empty tickers (skip continuation rows from multi-row wrap).
+			gotTickers := make([]string, 0, len(rows))
+			for _, row := range rows {
+				if row[0] != "" {
+					gotTickers = append(gotTickers, row[0])
 				}
-				t.Errorf("got %d rows %v, want %d %v", len(rows), got, len(tc.wantTickers), tc.wantTickers)
+			}
+			if len(gotTickers) != len(tc.wantTickers) {
+				t.Errorf("got tickers %v, want %v", gotTickers, tc.wantTickers)
 				return
 			}
-			for i, row := range rows {
-				if row[0] != tc.wantTickers[i] {
-					t.Errorf("row[%d] ticker = %q, want %q", i, row[0], tc.wantTickers[i])
+			// Sort both for order-independent comparison (filter logic, not sort logic).
+			sort.Strings(gotTickers)
+			wantSorted := make([]string, len(tc.wantTickers))
+			copy(wantSorted, tc.wantTickers)
+			sort.Strings(wantSorted)
+			for i := range gotTickers {
+				if gotTickers[i] != wantSorted[i] {
+					t.Errorf("ticker set mismatch: got %v, want %v", gotTickers, wantSorted)
+					break
 				}
 			}
 		})
@@ -204,4 +216,148 @@ func TestApplyFilterSeriesEmptyData(t *testing.T) {
 	if rows := m.seriesTable.Rows(); len(rows) != 0 {
 		t.Errorf("expected 0 rows for empty seriesData, got %d", len(rows))
 	}
+}
+
+// --- sort ---
+
+func strPtr(s string) *kalshi.FixedPointCount { return &s }
+
+func TestSortSeriesByVolDesc(t *testing.T) {
+m := minModel()
+m.seriesSortCol = "vol"
+m.seriesSortAsc = false
+s := []kalshi.Series{
+{Ticker: "LOW", VolumeFp: strPtr("100.00")},
+{Ticker: "HIGH", VolumeFp: strPtr("50000.00")},
+{Ticker: "MED", VolumeFp: strPtr("1000.00")},
+}
+m.sortSeries(s)
+want := []string{"HIGH", "MED", "LOW"}
+for i, want := range want {
+if s[i].Ticker != want {
+t.Errorf("pos %d = %q, want %q", i, s[i].Ticker, want)
+}
+}
+}
+
+func TestSortSeriesByVolAsc(t *testing.T) {
+m := minModel()
+m.seriesSortCol = "vol"
+m.seriesSortAsc = true
+s := []kalshi.Series{
+{Ticker: "LOW", VolumeFp: strPtr("100.00")},
+{Ticker: "HIGH", VolumeFp: strPtr("50000.00")},
+{Ticker: "MED", VolumeFp: strPtr("1000.00")},
+}
+m.sortSeries(s)
+want := []string{"LOW", "MED", "HIGH"}
+for i, want := range want {
+if s[i].Ticker != want {
+t.Errorf("pos %d = %q, want %q", i, s[i].Ticker, want)
+}
+}
+}
+
+func TestSortSeriesByTitleAsc(t *testing.T) {
+m := minModel()
+m.seriesSortCol = "title"
+m.seriesSortAsc = true
+s := []kalshi.Series{
+{Ticker: "C", Title: "Zebra"},
+{Ticker: "A", Title: "Apple"},
+{Ticker: "B", Title: "Mango"},
+}
+m.sortSeries(s)
+want := []string{"A", "B", "C"}
+for i, want := range want {
+if s[i].Ticker != want {
+t.Errorf("pos %d = %q, want %q", i, s[i].Ticker, want)
+}
+}
+}
+
+func TestSortSeriesTickerTiebreaker(t *testing.T) {
+// When primary key is equal, ticker tiebreaker should produce stable desc order.
+m := minModel()
+m.seriesSortCol = "vol"
+m.seriesSortAsc = false // desc; tiebreaker also desc
+s := []kalshi.Series{
+{Ticker: "AAA", VolumeFp: strPtr("100.00")},
+{Ticker: "ZZZ", VolumeFp: strPtr("100.00")},
+{Ticker: "MMM", VolumeFp: strPtr("100.00")},
+}
+m.sortSeries(s)
+// All volumes equal → tiebreaker is ticker descending.
+want := []string{"ZZZ", "MMM", "AAA"}
+for i, want := range want {
+if s[i].Ticker != want {
+t.Errorf("pos %d = %q, want %q", i, s[i].Ticker, want)
+}
+}
+}
+
+func TestNextSeriesSortCol(t *testing.T) {
+m := minModel()
+m.seriesSortCol = "vol"
+m.seriesSortAsc = false
+
+m.nextSeriesSortCol()
+if m.seriesSortCol != "title" {
+t.Errorf("after vol, got %q, want title", m.seriesSortCol)
+}
+if !m.seriesSortAsc {
+t.Errorf("title should default to asc")
+}
+
+m.nextSeriesSortCol()
+if m.seriesSortCol != "ticker" {
+t.Errorf("after title, got %q, want ticker", m.seriesSortCol)
+}
+
+m.nextSeriesSortCol()
+m.nextSeriesSortCol()
+// Should have cycled back to vol.
+if m.seriesSortCol != "vol" {
+t.Errorf("after full cycle, got %q, want vol", m.seriesSortCol)
+}
+if m.seriesSortAsc {
+t.Errorf("vol should default to desc (asc=false)")
+}
+}
+
+func TestFmtVolume(t *testing.T) {
+cases := []struct {
+input string
+want  string
+}{
+{"0.00", "-"},
+{"500.00", "500"},
+{"1500.00", "1.5K"},
+{"1500000.00", "1.5M"},
+}
+for _, tc := range cases {
+got := fmtVolume(&tc.input)
+if got != tc.want {
+t.Errorf("fmtVolume(%q) = %q, want %q", tc.input, got, tc.want)
+}
+}
+}
+
+func TestFmtFee(t *testing.T) {
+cases := []struct {
+ft   kalshi.SeriesFeeType
+mult float64
+want string
+}{
+{"quadratic_with_maker_fees", 1.0, "maker"},
+{"quadratic", 0.8, "quad×0.8"},
+{"flat", 1.0, "flat"},
+{"quadratic_with_maker_fees", 0.5, "maker×0.5"},
+}
+for _, tc := range cases {
+got := fmtFee(tc.ft, tc.mult)
+if got != tc.want {
+t.Errorf("fmtFee(%q, %g) = %q, want %q", tc.ft, tc.mult, got, tc.want)
+}
+}
 }

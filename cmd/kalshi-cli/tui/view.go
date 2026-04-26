@@ -238,7 +238,7 @@ switch m.screen {
 case ScreenCategories:
 hints = []string{"↑↓  browse", "⏎  go to series", "/  filter  (| OR  *  wildcard  category:X  tag:X)"}
 case ScreenSeriesList:
-hints = []string{"↑↓  navigate", "⏎  open series", "esc  back", "/  filter  (| for OR)"}
+hints = []string{"↑↓  navigate", "⏎  open series", "esc  back", "/  filter  (| for OR)", "s  sort col", "S  reverse sort"}
 case ScreenEventsList:
 hints = []string{"↑↓  navigate", "⏎  open event", "esc  back", "/  filter"}
 case ScreenMarketsList:
