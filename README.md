@@ -136,10 +136,12 @@ kalshi-cli --env demo   # launch against the demo/sandbox environment
 ### Navigation hierarchy
 
 ```
-Categories  →  Series (filtered)  →  Events  →  Markets  →  Orderbook
+Categories  →  Series  →  Events  →  Markets  →  Orderbook
 ```
 
 Each screen narrows the data; `esc` / `backspace` steps back. The current path is shown in the breadcrumb at the top of the screen.
+
+Each screen has its own independent filter. Filters stack — the series screen applies its own filter **on top of** the active category filter (AND logic), so you can progressively narrow results at each level.
 
 ### Key bindings
 
@@ -158,8 +160,8 @@ Each screen narrows the data; `esc` / `backspace` steps back. The current path i
 | Key | Action |
 |---|---|
 | _type_ | Narrow results live |
-| `⏎ Enter` | Apply filter and navigate (on Categories) / close bar |
-| `esc` | Clear filter and close bar |
+| `⏎ Enter` | Apply filter and navigate to Series (on Categories) / close bar |
+| `esc` | Clear this screen's filter and close bar |
 
 **In the order entry form:**
 
@@ -191,13 +193,15 @@ The filter bar (press `/`) is available on every screen. Filters apply live as y
 
 ```
 1. Launch: kalshi-cli
-2. (Optional) Press / and type a tag or category filter
+2. (Optional) Press / and type a category or tag filter
    e.g.  "hockey | basketball"  or  "category:sports"
-3. Press Enter → lands on Series screen filtered to matching series
-4. Navigate with ↑↓, Enter to open a series → Events screen
-5. Enter on an event → Markets screen (shows bid/ask/spread/volume)
-6. Enter on a market → Orderbook (scrollable with ↑↓)
-7. Press esc to back out, or o on a market row to open order entry
+3. Press Enter → navigates to Series screen (category filter stays active)
+4. (Optional) Press / again on the Series screen to add a series-level filter
+   — results must match both the category filter AND the series filter
+5. Navigate with ↑↓, Enter to open a series → Events screen
+6. Enter on an event → Markets screen (shows bid/ask/spread/volume)
+7. Enter on a market → Orderbook (scrollable with ↑↓)
+8. Press esc to back out, or o on a market row to open order entry
 ```
 
 ### Order entry
