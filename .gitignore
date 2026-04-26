@@ -1,3 +1,4 @@
 # Local secrets and build artifacts
 *.pem
 *.txt.key
+.idea
