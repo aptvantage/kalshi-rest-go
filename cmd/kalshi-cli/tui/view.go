@@ -72,7 +72,7 @@ func (m Model) viewContent() string {
 var parts []string
 
 // Filter bar (shown when filter mode is active OR a query is set).
-if m.filterMode || m.filterQuery != "" {
+if m.filterMode || m.currentFilter() != "" {
 parts = append(parts, m.viewFilterBar())
 }
 
@@ -96,7 +96,7 @@ if m.filterMode {
 content = m.filterInput.View()
 } else {
 content = filterLabelStyle.Render("filter: ") +
-lipgloss.NewStyle().Foreground(lipgloss.Color("#F3F4F6")).Render(m.filterQuery) +
+lipgloss.NewStyle().Foreground(lipgloss.Color("#F3F4F6")).Render(m.currentFilter()) +
 "  " +
 lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("(/ edit · esc clear)")
 }
@@ -218,8 +218,8 @@ case ScreenOrderEntry:
 parts = append(parts, "order entry")
 }
 
-if m.filterQuery != "" && !m.filterMode {
-parts = append(parts, "filter: "+m.filterQuery)
+if m.currentFilter() != "" && !m.filterMode {
+parts = append(parts, "filter: "+m.currentFilter())
 }
 
 text := strings.Join(parts, "  ·  ")

@@ -122,9 +122,9 @@ orderbookVP viewport.Model
 obContent   string // pre-rendered orderbook text
 
 // Client-side row filter (/ key).
-filterInput textinput.Model
-filterMode  bool   // true = textinput is open and focused
-filterQuery string // active query (persists after closing the input bar)
+filterInput   textinput.Model
+filterMode    bool              // true = textinput is open and focused
+screenFilters map[Screen]string // per-screen active filter query
 
 // Order entry form.
 orderForm orderForm
@@ -166,8 +166,9 @@ env:         env,
 nav:         []navEntry{{label: "categories", screen: ScreenCategories}},
 screen:      ScreenCategories,
 spinner:     sp,
-filterInput: fi,
-loading:     true,
+filterInput:   fi,
+screenFilters: make(map[Screen]string),
+loading:       true,
 }
 }
 
@@ -175,6 +176,11 @@ loading:     true,
 func (m Model) Init() tea.Cmd {
 return tea.Batch(verifyAuth(m.client), m.spinner.Tick)
 }
+// currentFilter returns the active filter query for the current screen.
+func (m Model) currentFilter() string {
+return m.screenFilters[m.screen]
+}
+
 
 // --- layout helpers ---
 
@@ -197,7 +203,7 @@ return m.width
 // within the terminal height (header border adds an extra line).
 func (m Model) tableHeight() int {
 h := m.contentHeight() - 2
-if m.filterMode || m.filterQuery != "" {
+if m.filterMode || m.currentFilter() != "" {
 h--
 }
 if h < 1 {
@@ -321,7 +327,7 @@ return true
 return false
 }
 
-// applyFilter rebuilds the current screen's table rows filtered by filterQuery.
+// applyFilter rebuilds the current screen's table rows filtered by the per-screen query.
 //
 // Filter syntax:
 //   - "|"          OR: "hockey | basketball" matches either
@@ -329,7 +335,7 @@ return false
 //   - "category:X" restrict match to category name field only
 //   - "tag:X"      restrict match to tag fields only
 func (m *Model) applyFilter() {
-q := strings.TrimSpace(m.filterQuery)
+q := strings.TrimSpace(m.screenFilters[m.screen])
 terms := parseTerms(strings.ToLower(q))
 
 // General terms (no field qualifier) are used to narrow the tags shown.
@@ -370,21 +376,23 @@ tags:        shownTags,
 m.initCategoriesTable(filtered)
 
 case ScreenSeriesList:
+parentQ := strings.TrimSpace(m.screenFilters[ScreenCategories])
+parentTerms := parseTerms(strings.ToLower(parentQ))
 filtered := make([]kalshi.Series, 0, len(m.seriesData))
 for _, s := range m.seriesData {
-if q == "" || q == "*" {
-filtered = append(filtered, s)
-continue
-}
 fields := map[string][]string{
 "category": {s.Category},
 "tag":      s.Tags,
 "ticker":   {s.Ticker},
 "title":    {s.Title},
 }
-if matchTerms(terms, fields) {
-filtered = append(filtered, s)
+if parentQ != "" && parentQ != "*" && !matchTerms(parentTerms, fields) {
+continue
 }
+if q != "" && q != "*" && !matchTerms(terms, fields) {
+continue
+}
+filtered = append(filtered, s)
 }
 m.initSeriesTable(filtered)
 

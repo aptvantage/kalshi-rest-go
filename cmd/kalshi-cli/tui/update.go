@@ -142,31 +142,32 @@ func (m Model) updateFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 switch msg.String() {
 case "esc":
 m.filterMode = false
-m.filterQuery = ""
+m.screenFilters[m.screen] = ""
 m.filterInput.SetValue("")
 m.applyFilter()
 return m, nil
 case "enter":
 m.filterMode = false
-m.filterQuery = m.filterInput.Value()
+m.screenFilters[m.screen] = m.filterInput.Value()
 m.applyFilter()
 // On categories, Enter navigates directly to series rather than
 // just closing the filter bar and making the user press Enter again.
 if m.screen == ScreenCategories {
+catFilter := m.screenFilters[ScreenCategories]
 navLabel := "series"
-if m.filterQuery != "" && m.filterQuery != "*" {
-navLabel = "series: " + m.filterQuery
+if catFilter != "" && catFilter != "*" {
+navLabel = "series: " + catFilter
 }
 m.nav = append(m.nav, navEntry{label: navLabel, screen: ScreenSeriesList})
 m.screen = ScreenSeriesList
-m.filterInput.SetValue(m.filterQuery)
+m.filterInput.SetValue(m.screenFilters[ScreenSeriesList])
 m.applyFilter()
 }
 return m, nil
 default:
 var cmd tea.Cmd
 m.filterInput, cmd = m.filterInput.Update(msg)
-m.filterQuery = m.filterInput.Value()
+m.screenFilters[m.screen] = m.filterInput.Value()
 m.applyFilter()
 return m, cmd
 }
@@ -185,7 +186,7 @@ case key.Matches(msg, DefaultKeyMap.Filter):
 switch m.screen {
 case ScreenCategories, ScreenSeriesList, ScreenEventsList, ScreenMarketsList:
 m.filterMode = true
-m.filterInput.SetValue(m.filterQuery)
+m.filterInput.SetValue(m.screenFilters[m.screen])
 return m, m.filterInput.Focus()
 }
 
@@ -210,15 +211,16 @@ m.categoriesTable.MoveUp(1)
 case key.Matches(msg, DefaultKeyMap.Down):
 m.categoriesTable.MoveDown(1)
 case key.Matches(msg, DefaultKeyMap.Enter):
-// Navigate to series filtered by the current query.
-// Category rows are for browsing only; the filter is what drives series results.
+// Navigate to series. The category filter stays on ScreenCategories;
+// the series screen gets its own independent filter.
+catFilter := m.screenFilters[ScreenCategories]
 navLabel := "series"
-if m.filterQuery != "" && m.filterQuery != "*" {
-navLabel = "series: " + m.filterQuery
+if catFilter != "" && catFilter != "*" {
+navLabel = "series: " + catFilter
 }
 m.nav = append(m.nav, navEntry{label: navLabel, screen: ScreenSeriesList})
 m.screen = ScreenSeriesList
-m.filterInput.SetValue(m.filterQuery)
+m.filterInput.SetValue(m.screenFilters[ScreenSeriesList])
 m.applyFilter()
 }
 
@@ -236,7 +238,7 @@ m.nav = append(m.nav, navEntry{label: row[0], screen: ScreenEventsList})
 m.screen = ScreenEventsList
 m.loading = true
 m.eventsData = nil
-m.filterQuery = ""
+m.screenFilters[ScreenEventsList] = ""
 m.filterInput.SetValue("")
 cmds = append(cmds, loadEvents(m.client, m.selectedSeriesTicker))
 }
@@ -258,7 +260,7 @@ m.nav = append(m.nav, navEntry{label: row[0], screen: ScreenMarketsList})
 m.screen = ScreenMarketsList
 m.loading = true
 m.marketsData = nil
-m.filterQuery = ""
+m.screenFilters[ScreenMarketsList] = ""
 m.filterInput.SetValue("")
 cmds = append(cmds, loadMarkets(m.client, m.selectedEventTicker))
 }
@@ -304,7 +306,7 @@ return m.updateOrderForm(msg)
 return m, tea.Batch(cmds...)
 }
 
-// navigateBack pops the nav stack and resets filter state.
+// navigateBack pops the nav stack and restores the parent screen's filter.
 func (m *Model) navigateBack() {
 if len(m.nav) <= 1 {
 return
@@ -312,8 +314,7 @@ return
 m.nav = m.nav[:len(m.nav)-1]
 m.screen = m.nav[len(m.nav)-1].screen
 m.filterMode = false
-m.filterQuery = ""
-m.filterInput.SetValue("")
+m.filterInput.SetValue(m.screenFilters[m.screen])
 // Rebuild the table we're returning to.
 m.applyFilter()
 }
